@@ -1,5 +1,7 @@
+import time
+from collections import deque
 from pathlib import Path
-
+from typing import List
 
 import numpy as np
 from rich.progress import Progress
@@ -11,227 +13,161 @@ import mediapipe as mp
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
 mp_holistic = mp.solutions.holistic
+mp_pose= mp.solutions.pose
+
+def setupMediapipe(session, image_streams : List[deque]):
+    """obtain on camera image stream width and height."""
+    eachCameraResolution = {'Height':[],'Width':[]}
+    image_height = image_width = 0
+    time2sleep = 0.2
+
+    for camera_int, image_queue in enumerate(image_streams):
+        frame_gotten = False
+        while frame_gotten is False:
+            try:
+                print("waiting for frame from camera... " + str(camera_int))
+                image = image_queue.pop()  # load first image from video
+                frame_gotten = True
+            except:
+                time.sleep(time2sleep)
+                pass
+
+        image_height, image_width, _ = image.shape
+        eachCameraResolution["Height"].append(image_height)
+        eachCameraResolution["Width"].append(image_width)
+
+        session.eachCameraResolution = eachCameraResolution
+
+def runMediaPipe(session, image_streams : List[deque], mp_poses : List, dummyRun=False):
+    """
+    Run Mediapipe-pose detector on the camera images
+    # Run MediaPipe on synced videos, and save body tracking data to be parsed
+    """
+
+    eachCamerasData = []  # Create an empty list that holds each cameras data
+    mediaPipe_dataList = []  # Create an empty list for mediapipes data
+
+    for camera_int, image_queue in enumerate(image_streams):
+        image = None
+        try:
+            image = image_queue.pop()  # load first image from video
+        except:
+            pass
+
+        if image is not None:
+            t1 = time.time()
+            try:
+                mediaPipe_data = mp_poses[camera_int].process(
+                    cv2.cvtColor(image, cv2.COLOR_BGR2RGB), #Convert the BGR image to RGB before processing
+                )  # NOTE: THIS IS WHERE THE MAGIC HAPENS
+            except:
+                pass
+                """ ^ zprevent limbo when:
+                    RuntimeError: CalculatorGraph::Run() failed in Run: 
+                    Calculator::Process() for node "poselandmarkbyroicpu__poselandmarksandsegmentat
+                    ioninverseprojection__InverseMatrixCalculator" failed: ; Inverse matrix cannot 
+                    be calculated.tors/util/inverse_matrix_calculator.cc:38) 
+                """
+
+            t2 = time.time()
+            # print("Function=%s, Time=%s" % ("inference call took: ", t2 - t1))
+
+        if image is not None:
+            eachCamerasData.append(
+                mediaPipe_data
+            )  # Append that cameras data for every frame to the camera datalist
+        else:
+            eachCamerasData.append(
+                None
+            )  # no image, no detection.
 
 
-def runMediaPipe(session, dummyRun=False):
-    """ 
-    Run MediaPipe on synced videos, and save body tracking data to be parsed 
-    """  
-
-
-
-    with mp_holistic.Holistic(
-                            static_image_mode = False, #use 'static image mode' to avoid system getting 'stuck' on ghost skeletons?
-                            model_complexity = 2, #in this house, we turn the Speed/Accuracy dial all the way towards accuracy \o/)
-                            ) as holistic:
-
-        eachCamerasData = []  # Create an empty list that holds each cameras data
-        eachCameraResolution = {'Height':[],'Width':[]}
-        for (  thisVidPath ) in ( session.syncedVidPath.iterdir() ):  # Run MediaPipe 'Holistic' (body, hands, face) tracker on each video in the raw video folder
-            if ( thisVidPath.suffix.lower() == ".mp4" ):  # NOTE - at some point we should build some list of 'synced video names' and check against that
-
-                
-                mediaPipe_dataList = []  # Create an empty list for mediapipes data
-                if not dummyRun:
-                    cap = cv2.VideoCapture(str(thisVidPath))
-
-                    frameNum = -1
-                    numFrames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-                    success, image = cap.read()  # load first image from video
-
-                    with Progress() as progress:
-                        progressBar = progress.add_task(
-                            "[magenta]MediaPiping: {}".format(thisVidPath.name),
-                            total=numFrames,
-                        )  # make progressbar
-
-                        while success:
-
-                            if frameNum % 5 == 0:
-                                progress.update(
-                                    progressBar, advance=5
-                                )  # increment progress bar everyh 5th frame
-
-                            frameNum += 1
-
-                            image_height, image_width, _ = image.shape
-
-                            results = holistic.process(
-                                cv2.cvtColor(image, cv2.COLOR_BGR2RGB), #Convert the BGR image to RGB before processing
-                            )  # NOTE: THIS IS WHERE THE MAGIC HAPENS 
-
-                            mediaPipe_dataList.append(
-                                results
-                            )  # Append data to mediapipe data list
-
-                            # load the next image (will break `while-loop` on the last frame)
-                            success, image = cap.read()  # load next image from video
-
-                eachCameraResolution["Height"].append(image_height)
-                eachCameraResolution["Width"].append(image_width)
-
-                eachCamerasData.append(
-                    mediaPipe_dataList
-                )  # Append that cameras data for every frame to the camera datalist
-
-    session.image_height = image_height
-    session.image_width = image_width
     session.mediaPipeData = eachCamerasData
-    session.eachCameraResolution = eachCameraResolution
-
 
 
 def parseMediaPipe(session):
     """ 
     Parse through saved MediaPipe data, and save out a numpy array of 2D points
-    """  
+    """
     numCams = len(session.mediaPipeData)  # Get number of cameras
-    numFrames = len(session.mediaPipeData[0])  # Get number of frames
+    # numFrames = len(session.mediaPipeData[0])  # Get number of frames
     # numBodyPoints = len(np.max(session.mediaPipeData[0][:].pose_landmarks.landmark[:]))#Get number of body points
     # numFacePoints = len(np.max(session.mediaPipeData[0][:].face_landmarks.landmark[:]))#Get number of face points
     # numLeftHandPoints = len(np.max(session.mediaPipeData[0][:].left_hand_landmarks.landmark[:]))#Get number of right hand points
     # numRightHandPoints = len(np.max(session.mediaPipeData[0][:].right_hand_landmarks.landmark[:]))#Get number of left hand points
     numBodyPoints = 33
-    numFacePoints = 468
-    numHandPoints = 21
+    # numFacePoints = 468
+    # numHandPoints = 21
 
     numTrackedPoints = (
-        numBodyPoints + numHandPoints * 2 + numFacePoints
+        numBodyPoints
     )  # Get total points
 
     # Create  array of nans the size of number of cams, frame, points, XYC
-    mediaPipeData_nCams_nFrames_nImgPts_XYC = np.empty(
-        (int(numCams), int(numFrames), int(numTrackedPoints), 3)
+    mediaPipeData_nCams_nImgPts_XYC = np.empty(
+        (int(numCams), int(numTrackedPoints), 3)
     )  # create empty array
-    mediaPipeData_nCams_nFrames_nImgPts_XYC[:] = np.NaN  # Fill it with NaNs!
+    mediaPipeData_nCams_nImgPts_XYC[:] = np.NaN  # Fill it with NaNs!
 
     for camNum in range(numCams):  # Loop through each camera
-        for frNum in range(numFrames):  # Loop through each frame
-            # make empty arrays for thisFrame's data
-            # thisFrame_X = np.empty(numTrackedPoints)
-            # thisFrame_X[:] = np.nan
-            # thisFrame_Y = thisFrame_X.copy()
-            # thisFrame_C = thisFrame_X.copy()
+        # make empty arrays for thisFrame's data
+        # thisFrame_X = np.empty(numTrackedPoints)
+        # thisFrame_X[:] = np.nan
+        # thisFrame_Y = thisFrame_X.copy()
+        # thisFrame_C = thisFrame_X.copy()
 
-            thisFrame_X_body = np.empty(numBodyPoints)
-            thisFrame_X_body[:] = np.nan
-            thisFrame_Y_body = thisFrame_X_body.copy()
-            thisFrame_C_body = thisFrame_X_body.copy()
+        thisFrame_X_body = np.empty(numBodyPoints)
+        thisFrame_X_body[:] = np.nan
+        thisFrame_Y_body = thisFrame_X_body.copy()
+        thisFrame_C_body = thisFrame_X_body.copy()
 
-            thisFrame_X_face = np.empty(numFacePoints)
-            thisFrame_X_face[:] = np.nan
-            thisFrame_Y_face = thisFrame_X_face.copy()
-            thisFrame_C_face = thisFrame_X_face.copy()
+        fullFrame = True
 
-            thisFrame_hands = np.empty(numHandPoints)
-            thisFrame_hands[:]= np.nan
+        try:
+            if session.mediaPipeData[camNum] is None:
+                thisFrame_X_body = np.empty(33)
+                thisFrame_Y_body = np.empty(33)
+                thisFrame_C_body = np.empty(33)
 
-            thisFrame_X_lefthand = thisFrame_hands.copy()
-            thisFrame_Y_lefthand = thisFrame_hands.copy()
-            thisFrame_C_lefthand = thisFrame_hands.copy()
+            # pull out ThisFrame's mediapipe data (`mpData.pose_landmarks.landmark` returns something iterable ¯\_(ツ)_/¯)
+            thisFrame_poseDataLandMarks = session.mediaPipeData[camNum]\
+                .pose_landmarks.landmark  # body ('pose') data
+            # stuff body data into pre-allocated nan array
+            thisFrame_X_body[:numBodyPoints] = [
+                pp.x for pp in thisFrame_poseDataLandMarks
+            ]  # PoseX data - Normalized screen coords (in range [0, 1]) - need multiply by image resultion for pixels
+            thisFrame_Y_body[:numBodyPoints] = [
+                pp.y for pp in thisFrame_poseDataLandMarks
+            ]  # PoseY data
+            thisFrame_C_body[:numBodyPoints] = [
+                pp.visibility for pp in thisFrame_poseDataLandMarks
+            ]  #'visibility' is MediaPose's 'confidence' measure in range [0,1]
+        except:
+            fullFrame = False
 
-            thisFrame_X_righthand = thisFrame_hands.copy()
-            thisFrame_Y_righthand = thisFrame_hands.copy()
-            thisFrame_C_righthand = thisFrame_hands.copy()
+        if fullFrame:
+            f = 9
 
-            fullFrame = True
-            if frNum == 107:
-                f = 9
-            try:
-                # pull out ThisFrame's mediapipe data (`mpData.pose_landmarks.landmark` returns something iterable ¯\_(ツ)_/¯)
-                thisFrame_poseDataLandMarks = session.mediaPipeData[camNum][
-                    frNum
-                ].pose_landmarks.landmark  # body ('pose') data
-                # stuff body data into pre-allocated nan array
-                thisFrame_X_body[:numBodyPoints] = [
-                    pp.x for pp in thisFrame_poseDataLandMarks
-                ]  # PoseX data - Normalized screen coords (in range [0, 1]) - need multiply by image resultion for pixels
-                thisFrame_Y_body[:numBodyPoints] = [
-                    pp.y for pp in thisFrame_poseDataLandMarks
-                ]  # PoseY data
-                thisFrame_C_body[:numBodyPoints] = [
-                    pp.visibility for pp in thisFrame_poseDataLandMarks
-                ]  #'visibility' is MediaPose's 'confidence' measure in range [0,1]
-            except:
-                fullFrame = False
-
-            # Right hand data
-            try:
-                thisFrame_rHandDataLandMarks = session.mediaPipeData[camNum][
-                    frNum
-                ].right_hand_landmarks.landmark  # right hand data
-                thisFrame_X_righthand[:numHandPoints] = [
-                    pp.x for pp in thisFrame_rHandDataLandMarks
-                ]  # PoseX data - Normalized screen coords (in range [0, 1]) - need multiply by image resultion for pixels
-                thisFrame_Y_righthand[:numHandPoints] = [
-                    pp.y for pp in thisFrame_rHandDataLandMarks
-                ]  # PoseY data
-                thisFrame_C_righthand[:numHandPoints] = [
-                    pp.visibility for pp in thisFrame_rHandDataLandMarks
-                ]  #'visibility' is MediaPose's 'confidence' measure in range [0,1]
-            except:
-                fullFrame = False
-
-            # Left hand data
-            try:
-                thisFrame_lHandDataLandMarks = session.mediaPipeData[camNum][
-                    frNum
-                ].left_hand_landmarks.landmark  # left hand data
-                thisFrame_X_lefthand[:numHandPoints ] = [
-                    pp.x for pp in thisFrame_lHandDataLandMarks
-                ]  # PoseX data - Normalized screen coords (in range [0, 1]) - need multiply by image resultion for pixels
-                thisFrame_Y_lefthand[:numHandPoints] = [
-                    pp.y for pp in thisFrame_lHandDataLandMarks
-                ]  # PoseY data
-                thisFrame_C_lefthand[:numHandPoints] = [
-                    pp.visibility for pp in thisFrame_lHandDataLandMarks
-                ]  #'visibility' is MediaPose's 'confidence' measure in range [0,1]
-            except:
-                fullFrame = False
-
-            # FaceMeshData
-            try:
-                thisFrame_faceDataLandMarks = session.mediaPipeData[camNum][
-                    frNum
-                ].face_landmarks.landmark  # face (mesh) data
-                thisFrame_X_face[:numFacePoints] = [
-                    pp.x for pp in thisFrame_faceDataLandMarks
-                ]  # PoseX data - Normalized screen coords (in range [0, 1]) - need multiply by image resultion for pixels
-                thisFrame_Y_face[:numFacePoints] = [
-                    pp.y for pp in thisFrame_faceDataLandMarks
-                ]  # PoseY data
-                # NOTE - There's also Z data in here
-                thisFrame_C_face[:numFacePoints] = [
-                    pp.visibility for pp in thisFrame_faceDataLandMarks
-                ]  #'visibility' is MediaPose's 'confidence' measure in range [0,1]
-            except:
-                fullFrame = False
-
-            if fullFrame:
-                f = 9
-
-            thisFrame_X = np.concatenate((thisFrame_X_body,thisFrame_X_righthand,thisFrame_X_lefthand,thisFrame_X_face))
-            thisFrame_Y = np.concatenate((thisFrame_Y_body,thisFrame_Y_righthand,thisFrame_Y_lefthand,thisFrame_Y_face))
-            thisFrame_C = np.concatenate((thisFrame_C_body,thisFrame_C_righthand,thisFrame_C_lefthand,thisFrame_C_face))
-            # stuff this frame's data into pre-allocated mediaPipeData_.... array
-            mediaPipeData_nCams_nFrames_nImgPts_XYC[camNum, frNum, :, 0] = thisFrame_X
-            mediaPipeData_nCams_nFrames_nImgPts_XYC[camNum, frNum, :, 1] = thisFrame_Y
-            mediaPipeData_nCams_nFrames_nImgPts_XYC[camNum, frNum, :, 2] = thisFrame_C
+        thisFrame_X = thisFrame_X_body
+        thisFrame_Y = thisFrame_Y_body
+        thisFrame_C = thisFrame_C_body
+        # stuff this frame's data into pre-allocated mediaPipeData_.... array
+        mediaPipeData_nCams_nImgPts_XYC[camNum, :, 0] = thisFrame_X
+        mediaPipeData_nCams_nImgPts_XYC[camNum, :, 1] = thisFrame_Y
+        mediaPipeData_nCams_nImgPts_XYC[camNum, :, 2] = thisFrame_C
 
 
     # convert from normalized screen coordinates to pixel coordinates
     for camera in range(numCams):
-        mediaPipeData_nCams_nFrames_nImgPts_XYC[camera, :, :, 0] *= session.eachCameraResolution['Width'][camera] 
-        mediaPipeData_nCams_nFrames_nImgPts_XYC[camera, :, :, 1] *= session.eachCameraResolution['Height'][camera] 
+        mediaPipeData_nCams_nImgPts_XYC[camera, :, 0] *= session.cgroup.cameras[camera].get_size()[0] # get the dimension from the cgroup directly. - that is the one used for triangulation and calculation of reproection error
+        mediaPipeData_nCams_nImgPts_XYC[camera, :, 1] *= session.cgroup.cameras[camera].get_size()[1]
 
+    # mediaPipeData_nCams_nImgPts_XYC[:, 34:, 2] = 1 #sets the non-body point to '1'
 
+    # np.save(session.dataArrayPath / "mediaPipeData_2d.npy", mediaPipeData_nCams_nImgPts_XYC,)
 
-    mediaPipeData_nCams_nFrames_nImgPts_XYC[:, :, 34:, 2] = 1
+    return mediaPipeData_nCams_nImgPts_XYC
 
-    np.save(session.dataArrayPath / "mediaPipeData_2d.npy", mediaPipeData_nCams_nFrames_nImgPts_XYC,)
-
-    return mediaPipeData_nCams_nFrames_nImgPts_XYC
-    
 # #def parseMediaPipe2(session):
 
 #         #numCams = len(session.mediaPipeData) #Get number of cameras
@@ -244,7 +180,7 @@ def parseMediaPipe(session):
 #         numFacePoints = 468
 #         numLeftHandPoints = 21
 #         numRightHandPoints = 21
-        
+
 #         numPoints = numBodyPoints+numFacePoints+numLeftHandPoints+numRightHandPoints #Get total points
 #         mediaPipe_nCams_nFrames_nImgPts_XYC = np.ndarray((int(session.numCams),int(session.numFrames),int(numPoints),3)) #Create empty array the size of number of cams, frame, points, XYC
 #         for nn in range(session.numCams):#Loop through each camera
@@ -288,12 +224,12 @@ def parseMediaPipe(session):
 #             #print(session.mediaPipe_datalist[0].pose_landmarks.landmark[0].x)
 
 #         #path_to_mediapipe_2d = session.dataArrayPath/'mediaPipeData_nCams_nFrames_nImgPts_XY.npy'
-        
+
 #         mediaPipeData_nCams_nFrames_nImgPts_XY =  mediaPipe_nCams_nFrames_nImgPts_XYC[:,:,:,0:2].copy()
 
 #         #mediaPipe_nCams_nFrames_nImgPts_XYC[:, :, :, 0] *= 640
 #         #mediaPipe_nCams_nFrames_nImgPts_XYC[:, :, :, 1] *= 480
-        
+
 #         np.save(session.dataArrayPath / "mediaPipe_2d.npy", mediaPipe_nCams_nFrames_nImgPts_XYC,)
 
 #         return mediaPipe_nCams_nFrames_nImgPts_XYC

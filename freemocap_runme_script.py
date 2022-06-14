@@ -1,6 +1,9 @@
 import freemocap
-freemocap.RunMe()
 
+import logging
+
+logging.getLogger('numba').setLevel(logging.WARNING)
+freemocap.RunMe()
 
 #####################
 ### freemocap.RunMe() - Default parameters

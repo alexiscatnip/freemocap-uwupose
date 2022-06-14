@@ -1,3 +1,4 @@
+from aniposelib.cameras import CameraGroup
 
 from freemocap.fmc_startup import startup, startupGUI
 from freemocap.webcam import camera_settings, timesync
@@ -136,36 +137,36 @@ def RunMe(sessionID=None,
     # %% Initialization
     if stage == 1:
         camera_settings.initialize(sesh,stage,board)
-    elif stage ==2:
-        timesync.time_sync_initialize(sesh)
+    # elif stage ==2:
+    #     timesync.time_sync_initialize(sesh)
     else:
         sesh.initialize(stage)
 
     # %% Stage One
-
-    if stage <= 1:
-        thisStage=1
-        console.rule(style="color({})".format(14))
-        console.rule('Starting Video Recordings'.upper(), style="color({})".format(14))
-        console.rule(style="color({})".format(14))
-
-        runcams.RecordCams(sesh, sesh.cam_inputs, sesh.parameterDictionary, sesh.rotationInputs)
-        sesh.save_session()
-    else:
-        print('Skipping Video Recording')
-
+    #
+    # if stage <= 1:
+    #     thisStage=1
+    #     console.rule(style="color({})".format(14))
+    #     console.rule('Starting Video Recordings'.upper(), style="color({})".format(14))
+    #     console.rule(style="color({})".format(14))
+    #
+    #     runcams.RecordCams(sesh, sesh.cam_inputs, sesh.parameterDictionary, sesh.rotationInputs)
+    #     sesh.save_session()
+    # else:
+    #     print('Skipping Video Recording')
+    #
 
     # %% Stage Two
-    if stage <= 2:
-        thisStage=2
-        console.rule(style="color({})".format(thisStage))
-        console.rule('Synchronizing Recorded Videos'.upper(),style="color({})".format(thisStage))
-        console.rule(style="color({})".format(thisStage))
-
-        runcams.SyncCams(sesh, sesh.timeStampData,sesh.numCamRange,sesh.vidNames,sesh.camIDs)
-        sesh.save_session()
-    else:
-        print('Skipping Video Syncing')
+    # if stage <= 2:
+    #     thisStage=2
+    #     console.rule(style="color({})".format(thisStage))
+    #     console.rule('Synchronizing Recorded Videos'.upper(),style="color({})".format(thisStage))
+    #     console.rule(style="color({})".format(thisStage))
+    #
+    #     runcams.SyncCams(sesh, sesh.timeStampData,sesh.numCamRange,sesh.vidNames,sesh.camIDs)
+    #     sesh.save_session()
+    # else:
+    #     print('Skipping Video Syncing')
 
     # %% Stage Three
     if stage <= 3:
@@ -173,17 +174,20 @@ def RunMe(sessionID=None,
         console.rule(style="color({})".format(thisStage))
         console.rule('Starting Capture Volume Calibration'.upper(),style="color({})".format(thisStage))
         console.rule(style="color({})".format(thisStage))
-        console.print(Padding('Using Anipose to calculate 6 degree-of-freedom position (and distortion coeffs) of each camera based on detected charuco boards. This information is used to create a Camera Projection Matrix for each camera, which is later used in the 3d reconstruction stage', (1,4)), overflow="fold", justify='center',style="color({})".format(thisStage))
+        console.print(Padding('Loading Anipose-style 6DOF extrinsic parameters. for 3d reconstruction stage', (1,4)), overflow="fold", justify='center',style="color({})".format(thisStage))
         console.rule('See https://anipose.org for details', style="color({})".format(thisStage))
         console.rule(style="color({})".format(thisStage))
 
-        if sesh.numFrames is None:
-            a_sync_vid_path = list(sesh.syncedVidPath.glob('*.mp4'))
-            temp_cap =   cv2.VideoCapture(str(a_sync_vid_path[0]))
-            sesh.numFrames = temp_cap.get(cv2.CAP_PROP_FRAME_COUNT)
-            temp_cap.release()
+        # if sesh.numFrames is None:
+        #     a_sync_vid_path = list(sesh.syncedVidPath.glob('*.mp4'))
+        #     temp_cap =   cv2.VideoCapture(str(a_sync_vid_path[0]))
+        #     sesh.numFrames = temp_cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        #     temp_cap.release()
 
-        sesh.cgroup, sesh.mean_charuco_fr_mar_xyz = calibrate.CalibrateCaptureVolume(sesh,board, calVideoFrameLength)
+        # sesh.cgroup, sesh.mean_charuco_fr_mar_xyz = calibrate.CalibrateCaptureVolume(sesh,board, calVideoFrameLength)
+        #let's just load the charuco points from our own calibration in anipose.'
+        sesh.cgroup = CameraGroup.load('calibration.toml')
+        sesh.mean_charuco_fr_mar_xyz = None #what is this?
 
         print('Anipose Calibration Successful!')
     else:
@@ -204,103 +208,107 @@ def RunMe(sessionID=None,
 
             console.rule(style="color({})".format(thisStage))    
             console.rule('Running MediaPipe skeleton tracker - https://google.github.io/mediapipe', style="color({})".format(thisStage))    
-            console.rule(style="color({})".format(thisStage))    
+            console.rule(style="color({})".format(thisStage))
 
+            # Drun cams and inferefnce
+
+            runcams.RecordCams(sesh, sesh.cam_inputs, sesh.parameterDictionary, sesh.rotationInputs)
+            """ 
             if runMediaPipe:
                 fmc_mediapipe.runMediaPipe(sesh)
-                sesh.mediaPipeData_nCams_nFrames_nImgPts_XYC = fmc_mediapipe.parseMediaPipe(sesh)
+                sesh.mediaPipeData_nCams_nImgPts_XYC = fmc_mediapipe.parseMediaPipe(sesh)
 
             else:
                 print('`runMediaPipe` set to False, so we\'re loading MediaPipe data from npy file')
-                sesh.mediaPipeData_nCams_nFrames_nImgPts_XYC = np.load(sesh.dataArrayPath/'mediaPipeData_2d.npy', allow_pickle=True)
+                sesh.mediaPipeData_nCams_nImgPts_XYC = np.load(sesh.dataArrayPath/'mediaPipeData_2d.npy', allow_pickle=True)
             
             if save_annotated_videos:
                 fmc_mediapipe_annotation.annotate_session_videos_with_mediapipe(sesh)
 
-
             sesh.mediaPipeSkel_fr_mar_xyz, sesh.mediaPipeSkel_reprojErr = reconstruct3D.reconstruct3D(sesh,sesh.mediaPipeData_nCams_nFrames_nImgPts_XYC, confidenceThreshold=reconstructionConfidenceThreshold)
-            
-            if bundle_adjust_3d_points:
-                sesh.mediaPipeSkel_fr_mar_xyz_og = sesh.mediaPipeSkel_fr_mar_xyz.copy()
-                np.save(sesh.dataArrayPath/'mediaPipeSkel_3d_raw.npy', sesh.mediaPipeSkel_fr_mar_xyz_og) #save data to npy
+            """
 
-                from mediapipe.python.solutions import holistic as mp_holistic
-                mediapipe_body_pose_connections = [this_connection for this_connection in mp_holistic.POSE_CONNECTIONS]
-                with console.status('Running bundle adjustment optimization on 3d points...'):
-                    sesh.mediaPipeSkel_fr_mar_xyz = sesh.cgroup.optim_points(sesh.mediaPipeData_nCams_nFrames_nImgPts_XYC[:,:,:,:2],
-                                                                            sesh.mediaPipeSkel_fr_mar_xyz, 
-                                                                            constraints=mediapipe_body_pose_connections,
-                                                                            verbose=True)
-                print('Done adjusting bundles!')
-
-
-
-            np.save(sesh.dataArrayPath/'mediaPipeSkel_3d.npy', sesh.mediaPipeSkel_fr_mar_xyz) #save data to npy
-            np.save(sesh.dataArrayPath/'mediaPipeSkel_reprojErr.npy', sesh.mediaPipeSkel_reprojErr) #save data to npy
-
-            #smoooooooooth, just a bit
-            smoothWinLength = 5
-            smoothOrder = 3
-            for dim in range(sesh.mediaPipeSkel_fr_mar_xyz.shape[2]):
-                for mm in range(sesh.mediaPipeSkel_fr_mar_xyz.shape[1]):
-                    sesh.mediaPipeSkel_fr_mar_xyz[:,mm,dim] = savgol_filter(sesh.mediaPipeSkel_fr_mar_xyz[:,mm,dim], smoothWinLength, smoothOrder)
+            # if bundle_adjust_3d_points:
+            #     sesh.mediaPipeSkel_fr_mar_xyz_og = sesh.mediaPipeSkel_fr_mar_xyz.copy()
+            #     np.save(sesh.dataArrayPath/'mediaPipeSkel_3d_raw.npy', sesh.mediaPipeSkel_fr_mar_xyz_og) #save data to npy
+            #
+            #     from mediapipe.python.solutions import holistic as mp_holistic
+            #     mediapipe_body_pose_connections = [this_connection for this_connection in mp_holistic.POSE_CONNECTIONS]
+            #     with console.status('Running bundle adjustment optimization on 3d points...'):
+            #         sesh.mediaPipeSkel_fr_mar_xyz = sesh.cgroup.optim_points(sesh.mediaPipeData_nCams_nFrames_nImgPts_XYC[:,:,:,:2],
+            #                                                                 sesh.mediaPipeSkel_fr_mar_xyz,
+            #                                                                 constraints=mediapipe_body_pose_connections,
+            #                                                                 verbose=True)
+            #     print('Done adjusting bundles!')
+            #
 
 
-            if place_skeleton_on_origin:
-                sesh.mediaPipeSkel_fr_mar_xyz_smoothed_unrotated = sesh.mediaPipeSkel_fr_mar_xyz.copy()
-                np.save(sesh.dataArrayPath/'mediaPipeSkel_3d_smoothed_unrotated.npy', sesh.mediaPipeSkel_fr_mar_xyz_smoothed_unrotated) #save data to npy
-
-                origin_aligned_skeleton_data_XYZ = fmc_origin_alignment.align_skeleton_with_origin(sesh,sesh.mediaPipeSkel_fr_mar_xyz,good_clean_frame_number)
-                np.save(sesh.dataArrayPath/'mediaPipeSkel_3d_smoothed.npy', origin_aligned_skeleton_data_XYZ) #save data to npy
-
-            else:
-                np.save(sesh.dataArrayPath/'mediaPipeSkel_3d_smoothed.npy', sesh.mediaPipeSkel_fr_mar_xyz)
+            # np.save(sesh.dataArrayPath/'mediaPipeSkel_3d.npy', sesh.mediaPipeSkel_fr_mar_xyz) #save data to npy
+            # np.save(sesh.dataArrayPath/'mediaPipeSkel_reprojErr.npy', sesh.mediaPipeSkel_reprojErr) #save data to npy
+            #
+            # #smoooooooooth, just a bit
+            # smoothWinLength = 5
+            # smoothOrder = 3
+            # for dim in range(sesh.mediaPipeSkel_fr_mar_xyz.shape[2]):
+            #     for mm in range(sesh.mediaPipeSkel_fr_mar_xyz.shape[1]):
+            #         sesh.mediaPipeSkel_fr_mar_xyz[:,mm,dim] = savgol_filter(sesh.mediaPipeSkel_fr_mar_xyz[:,mm,dim], smoothWinLength, smoothOrder)
+            #
+            #
+            # if place_skeleton_on_origin:
+            #     sesh.mediaPipeSkel_fr_mar_xyz_smoothed_unrotated = sesh.mediaPipeSkel_fr_mar_xyz.copy()
+            #     np.save(sesh.dataArrayPath/'mediaPipeSkel_3d_smoothed_unrotated.npy', sesh.mediaPipeSkel_fr_mar_xyz_smoothed_unrotated) #save data to npy
+            #
+            #     origin_aligned_skeleton_data_XYZ = fmc_origin_alignment.align_skeleton_with_origin(sesh,sesh.mediaPipeSkel_fr_mar_xyz,good_clean_frame_number)
+            #     np.save(sesh.dataArrayPath/'mediaPipeSkel_3d_smoothed.npy', origin_aligned_skeleton_data_XYZ) #save data to npy
+            #
+            # else:
+            #     np.save(sesh.dataArrayPath/'mediaPipeSkel_3d_smoothed.npy', sesh.mediaPipeSkel_fr_mar_xyz)
 
 
 
 
         sesh.save_session()
 
-
-        if sesh.useOpenPose:
-            console.rule(style="color({})".format(thisStage))
-            console.rule('Running OpenPose skeleton tracker - https://github.com/CMU-Perceptual-Computing-Lab/openpose', style="color({})".format(thisStage))
-            console.rule(style="color({})".format(thisStage))
-
-
-            fmc_openpose.runOpenPose(sesh, runOpenPose=runOpenPose)
-            sesh.openPoseData_nCams_nFrames_nImgPts_XYC = fmc_openpose.parseOpenPose(sesh)
-            sesh.openPoseSkel_fr_mar_xyz, sesh.openPoseSkel_reprojErr = reconstruct3D.reconstruct3D(sesh,sesh.openPoseData_nCams_nFrames_nImgPts_XYC, confidenceThreshold=reconstructionConfidenceThreshold)
-            np.save(sesh.dataArrayPath/'openPoseSkel_3d.npy', sesh.openPoseSkel_fr_mar_xyz) #save data to npy
-            np.save(sesh.dataArrayPath/'openPoseSkel_reprojErr.npy', sesh.openPoseSkel_reprojErr) #save data to npy
-
-            smoothWinLength = 5
-            smoothOrder = 3
-            for dim in range(sesh.openPoseSkel_fr_mar_xyz.shape[2]):
-                for mm in range(sesh.openPoseSkel_fr_mar_xyz.shape[1]):
-                    sesh.openPoseSkel_fr_mar_xyz[:,mm,dim] = savgol_filter(sesh.openPoseSkel_fr_mar_xyz[:,mm,dim], smoothWinLength, smoothOrder)
-
-            np.save(sesh.dataArrayPath/'openPoseSkel_3d_smoothed.npy', sesh.openPoseSkel_fr_mar_xyz) #save data to npy
+        #
+        # if sesh.useOpenPose:
+        #     console.rule(style="color({})".format(thisStage))
+        #     console.rule('Running OpenPose skeleton tracker - https://github.com/CMU-Perceptual-Computing-Lab/openpose', style="color({})".format(thisStage))
+        #     console.rule(style="color({})".format(thisStage))
+        #
+        #
+        #     fmc_openpose.runOpenPose(sesh, runOpenPose=runOpenPose)
+        #     sesh.openPoseData_nCams_nFrames_nImgPts_XYC = fmc_openpose.parseOpenPose(sesh)
+        #     sesh.openPoseSkel_fr_mar_xyz, sesh.openPoseSkel_reprojErr = reconstruct3D.reconstruct3D(sesh,sesh.openPoseData_nCams_nFrames_nImgPts_XYC, confidenceThreshold=reconstructionConfidenceThreshold)
+        #     np.save(sesh.dataArrayPath/'openPoseSkel_3d.npy', sesh.openPoseSkel_fr_mar_xyz) #save data to npy
+        #     np.save(sesh.dataArrayPath/'openPoseSkel_reprojErr.npy', sesh.openPoseSkel_reprojErr) #save data to npy
+        #
+        #     smoothWinLength = 5
+        #     smoothOrder = 3
+        #     for dim in range(sesh.openPoseSkel_fr_mar_xyz.shape[2]):
+        #         for mm in range(sesh.openPoseSkel_fr_mar_xyz.shape[1]):
+        #             sesh.openPoseSkel_fr_mar_xyz[:,mm,dim] = savgol_filter(sesh.openPoseSkel_fr_mar_xyz[:,mm,dim], smoothWinLength, smoothOrder)
+        #
+        #     np.save(sesh.dataArrayPath/'openPoseSkel_3d_smoothed.npy', sesh.openPoseSkel_fr_mar_xyz) #save data to npy
 
         sesh.save_session()
         sesh.syncedVidList = []
-
-        if sesh.useDLC:
-
-            console.rule(style="color({})".format(thisStage))
-            console.rule('Running DeepLabCut :mouse: - https://deeplabcut.org', style="color({})".format(thisStage))
-            console.rule(style="color({})".format(thisStage))
-
-
-            for vid in sesh.syncedVidPath.glob('*.mp4'):
-                sesh.syncedVidList.append(str(vid))
-
-            for config_path in dlc_config_paths:
-                dlc.analyze_videos(config_path,sesh.syncedVidList, destfolder= sesh.dlcDataPath, save_as_csv=True)
-                sesh.dlcData_nCams_nFrames_nImgPts_XYC = fmc_deeplabcut.parseDeepLabCut(sesh, config_path)
-                sesh.dlc_fr_mar_xyz, sesh.dlc_reprojErr = reconstruct3D.reconstruct3D(sesh,sesh.dlcData_nCams_nFrames_nImgPts_XYC, confidenceThreshold=reconstructionConfidenceThreshold)
-                np.save(sesh.dataArrayPath/'deepLabCut_3d.npy', sesh.dlc_fr_mar_xyz) #save data to npy
-                np.save(sesh.dataArrayPath/'deepLabCut_reprojErr.npy', sesh.dlc_reprojErr) #save data to npy
+        #
+        # if sesh.useDLC:
+        #
+        #     console.rule(style="color({})".format(thisStage))
+        #     console.rule('Running DeepLabCut :mouse: - https://deeplabcut.org', style="color({})".format(thisStage))
+        #     console.rule(style="color({})".format(thisStage))
+        #
+        #
+        #     for vid in sesh.syncedVidPath.glob('*.mp4'):
+        #         sesh.syncedVidList.append(str(vid))
+        #
+        #     for config_path in dlc_config_paths:
+        #         dlc.analyze_videos(config_path,sesh.syncedVidList, destfolder= sesh.dlcDataPath, save_as_csv=True)
+        #         sesh.dlcData_nCams_nFrames_nImgPts_XYC = fmc_deeplabcut.parseDeepLabCut(sesh, config_path)
+        #         sesh.dlc_fr_mar_xyz, sesh.dlc_reprojErr = reconstruct3D.reconstruct3D(sesh,sesh.dlcData_nCams_nFrames_nImgPts_XYC, confidenceThreshold=reconstructionConfidenceThreshold)
+        #         np.save(sesh.dataArrayPath/'deepLabCut_3d.npy', sesh.dlc_fr_mar_xyz) #save data to npy
+        #         np.save(sesh.dataArrayPath/'deepLabCut_reprojErr.npy', sesh.dlc_reprojErr) #save data to npy
         sesh.save_session()
     else:
 

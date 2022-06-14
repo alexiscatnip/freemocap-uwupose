@@ -11,7 +11,7 @@ import numpy as np
 
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
-mp_holistic = mp.solutions.holistic
+mp_pose = mp.solutions.pose
 
 class VideoSetup(threading.Thread):
     """
@@ -107,7 +107,7 @@ class MediaPipeVideoSetup(threading.Thread):
         else:
             cap = cv2.VideoCapture(self.camID, cv2.CAP_ANY)
 
-        with mp_holistic.Holistic(
+        with mp_pose.Pose(
             static_image_mode=False,
             model_complexity=0,
             enable_segmentation=True) as holistic:
@@ -157,29 +157,11 @@ class MediaPipeVideoSetup(threading.Thread):
                         print(e)
                     mp_drawing.draw_landmarks(
                         frame1,
-                        results.face_landmarks,
-                        mp_holistic.FACEMESH_CONTOURS,
-                        landmark_drawing_spec=None,
-                        connection_drawing_spec=mp_drawing_styles
-                        .get_default_face_mesh_contours_style())
-                    mp_drawing.draw_landmarks(
-                        frame1,
                         results.pose_landmarks,
-                        mp_holistic.POSE_CONNECTIONS,
+                        mp_pose.POSE_CONNECTIONS,
                         landmark_drawing_spec=mp_drawing_styles
                         .get_default_pose_landmarks_style())
-                    mp_drawing.draw_landmarks(
-                        frame1,
-                        results.left_hand_landmarks,
-                        mp_holistic.HAND_CONNECTIONS,
-                        landmark_drawing_spec=mp_drawing_styles
-                        .get_default_hand_landmarks_style())
-                    mp_drawing.draw_landmarks(
-                        frame1,
-                        results.right_hand_landmarks,
-                        mp_holistic.HAND_CONNECTIONS,
-                        landmark_drawing_spec=mp_drawing_styles
-                        .get_default_hand_landmarks_style())
+
                     if rotNum is not None:
                         frame1 = imutils.rotate_bound(frame1, angle=rotNum)
                         
