@@ -1,7 +1,8 @@
 from collections import deque
 
+import numpy
+
 from freemocap import fmc_mediapipe, reconstruct3D, play_skeleton_animation
-from freemocap.fmc_mediapipe import mp_pose
 from freemocap.webcam import startcamrecording, timesync, videotrim
 
 from pathlib import Path
@@ -13,21 +14,11 @@ from tkinter import Tk
 
 from src import steamVR_thread
 
-
-def do_inference(session, image_streams):
-    # do inference on frame.
-    fmc_mediapipe.runMediaPipe(session, image_streams, session.mp_poses)
-
-
 def do_triangulation(session):
-    session.mediaPipeSkel_fr_mar_xyz, session.mediaPipeSkel_reprojErr = reconstruct3D.reconstruct3D(session,
-                                                                                                    session.mediaPipeData_nCams_nImgPts_XYC,
-                                                                                                    0.5)
-
-
-def parse_inference_results(session):
-    # convert results of inteference to shared data format
-    session.mediaPipeData_nCams_nImgPts_XYC = fmc_mediapipe.parseMediaPipe(session)
+    session.mediaPipeSkel_fr_mar_xyz, session.mediaPipeSkel_reprojErr = \
+        reconstruct3D.reconstruct3D(session,
+                                    session.mediaPipeData_nCams_nImgPts_XYC,
+                                    0.5)
 
 
 def setupmediapipe(session, image_streams):
@@ -46,15 +37,15 @@ Run the live ingerence    """
 
     # %% Starting the thread recordings for each camera
     threads = []
-    image_streams = []
+    pixel_point_streams = []
     for n in numCamRange:  # starts recording video, opens threads for each camera
         singleCamID = "Cam{}".format(n + 1)
         camIDs.append(
             singleCamID
         )
 
-        image_Q = deque(maxlen=1)
-        image_streams.append(image_Q)
+        pixel_points_out_queue = deque(maxlen=1)
+        pixel_point_streams.append(pixel_points_out_queue)
         camRecordings = startcamrecording.CamRecordingThread(
             session,
             camIDs[n],
@@ -64,7 +55,7 @@ Run the live ingerence    """
             # session.rawVidPath,
             None,
             parameterDictionary,
-            image_Q
+            pixel_points_out_queue
         )
         camRecordings.start()
 
@@ -72,19 +63,11 @@ Run the live ingerence    """
 
     # main loop - inference, triangulation, drawing.
     session.mp_poses = []
-    # create inference model.
-    for i in range(numCams):
-        _mp_pose = mp_pose.Pose(  # create our detector. These are default parameters as used in the tutorial.
-            model_complexity=2,  # in this house, we turn the Speed/Accuracy dial all the way towards accuracy \o/)
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-            smooth_landmarks=True,  # nani kore?
-            static_image_mode=False)  # use 'static image mode' to avoid system getting 'stuck' on ghost skeletons?
-        session.mp_poses.append(_mp_pose)
 
-    setupmediapipe(session, image_streams)
 
-    pipe_3d_points = deque(maxlen=1)
+    # setupmediapipe(session, image_streams)
+
+    pipe_3d_points = deque(maxlen=10)
     steamVR_output_thread = steamVR_thread.SteamVRThread(
         pipe_3d_points,
         session
@@ -110,22 +93,39 @@ Run the live ingerence    """
     #     # showAnimation=showAnimation,
     # )
     from timeit import default_timer as timer
+    start = timer()
 
     stop_flag = False
     while not stop_flag:
-        start = timer()
+        not_all_images_ready = False
+        #get points and triangulate
 
-        t1 = time.time()
-        do_inference(session, image_streams)
-        parse_inference_results(session)
-        t2 = time.time()
+        #guard clause
+        for stream in pixel_point_streams:
+            if not stream: #not empty
+                not_all_images_ready = True
+                continue
+
+        if not_all_images_ready:
+            time.sleep(0.001)
+            continue
+
+
+        mediaPipeData_nCams_nImgPts_XYC = None
+        for stream in pixel_point_streams:
+            data = stream.pop()
+            wrapped_data = np.expand_dims(data, axis=0)
+            if mediaPipeData_nCams_nImgPts_XYC is None:
+                mediaPipeData_nCams_nImgPts_XYC = wrapped_data
+            else:
+                mediaPipeData_nCams_nImgPts_XYC = numpy.concatenate((mediaPipeData_nCams_nImgPts_XYC, wrapped_data),axis = 0)
+        session.mediaPipeData_nCams_nImgPts_XYC = mediaPipeData_nCams_nImgPts_XYC
         do_triangulation(session)
-        t3 = time.time()
 
-        print_timetaken = False
-        if print_timetaken:
-            print("Function=%s, Time=%s" % (do_inference.__name__, t2 - t1))
-            print("Function=%s, Time=%s" % (do_triangulation.__name__, t3 - t2))
+        # print_timetaken = False
+        # if print_timetaken:
+        #     print("Function=%s, Time=%s" % (do_inference.__name__, t2 - t1))
+        #     print("Function=%s, Time=%s" % (do_triangulation.__name__, t3 - t2))
 
         pipe_3d_points.append(session.mediaPipeSkel_fr_mar_xyz)
 
@@ -137,7 +137,8 @@ Run the live ingerence    """
         # time.sleep(time2sleep)
 
         end = timer()
-        print("FPS: " + str(1 / (end - start)))
+        # print("FPS: " + str(1 / (end - start)))
+        start = timer()
 
     for camRecordings in threads:
         camRecordings.join()  # make sure that one thread ending doesn't immediately end all the others (before they can dump data in a pickle file)

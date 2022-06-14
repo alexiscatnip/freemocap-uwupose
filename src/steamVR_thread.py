@@ -2,12 +2,15 @@
 import collections
 import threading
 from collections import deque, namedtuple
+from statistics import mean
 
 import numpy
+from scipy.signal import savgol_filter
 
 from src.helpers import sendToSteamVR, mediapipe33To3dpose, get_rot, get_rot_mediapipe, get_rot_hands
 
 import time
+import winsound
 
 
 def pose_ok(pose3d):
@@ -85,9 +88,9 @@ class SteamVRThread(threading.Thread):
                 time.sleep(0.2)
 
             self.params = {}
-            self.params['smoothing'] = 0.1
-            self.params['additional_smoothing'] = 0.1
-            self.camera_latency = 0.0 #300ms
+            self.params['smoothing'] = 0
+            self.params['additional_smoothing'] = 0
+            self.camera_latency = 0.0 #300ms?
             resp = sendToSteamVR(f"settings 50 {self.params['smoothing']} {self.params['additional_smoothing']}")
             # print("settings returned this: ")
             # print(resp)
@@ -95,8 +98,12 @@ class SteamVRThread(threading.Thread):
             #     resp = sendToSteamVR(f"settings 50 {params.smoothing} {params.additional_smoothing}")
             #     print(resp)
             #     time.sleep(1)
+        self.is_beeping = False
 
     def run(self):
+        # filter_memory = deque(maxlen = 5)
+        last_frame_times = deque(maxlen=20)
+
         """run the thread."""
         # 3. send 3D pose data stream to vr:
         lastSentTime = time.time()
@@ -126,8 +133,20 @@ class SteamVRThread(threading.Thread):
                 #     pose3d[j] = params.global_rot_y.apply(pose3d[j])
 
                 if not pose_ok(pose3d):
-                    print("failed to triangulate lower body for this frame.")
+                    # print("failed to triangulate lower body for this frame.")
+                    self.is_beeping = True
+                    winsound.PlaySound('sound.wav', winsound.SND_FILENAME |  winsound.SND_ASYNC)
                     continue
+
+                # filter_memory
+
+                # # smooth it.
+                # smoothWinLength = 5
+                # smoothOrder = 3
+                # for dim in range(pose3d.shape[1]):
+                #     for mm in range(pose3d.shape[0]):
+                #         pose3d[mm, dim] = savgol_filter(
+                #             pose3d[mm, dim], smoothWinLength, smoothOrder)
 
                 self.params['feet_rotation'] = False
                 if not self.params['feet_rotation']:
@@ -137,23 +156,25 @@ class SteamVRThread(threading.Thread):
 
                 # send feet and hip
                 frameTime = time.time() - lastSentTime
+                last_frame_times.append(frameTime)
                 lastSentTime = time.time()
-                for i in [(0, 1), (5, 2), (6, 0)]:
+                print("FPS : " + str(1/mean(last_frame_times)))
+                # for i in [(0, 1), (5, 2), (6, 0)]:
+                for i in [(6, 0)]:
                     joint = pose3d[i[0]]
                     # words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {-frameTime - self.camera_latency} 0.0"
-                    words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {0} 0.0"
+                    words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {0} 0"
                     res = sendToSteamVR(words)
                     print(words)
 
                 if self.session.use_hands:
                     hand_rots = get_rot_hands(pose3d)
-                    for i in [(10, 0), (15, 1)]:
+                    # for i in [(10, 0), (15, 1)]:
+                    for i in [(10, 0)]:
                         joint = pose3d[i[0]] # for each foot and hips, offset it by skeleton position and send to steamvr
-                        sendToSteamVR(
-                            f"updatepose {i[1] + 3} {joint[0]} {joint[1]} {joint[2]} {hand_rots[i[1]][3]} {hand_rots[i[1]][0]} {hand_rots[i[1]][1]} {hand_rots[i[1]][2]} {0} 0.6")
-
-
-
+                        handmsg = f"updatepose {i[1] + 1} {joint[0]} {joint[1]} {joint[2]} {hand_rots[i[1]][3]} {hand_rots[i[1]][0]} {hand_rots[i[1]][1]} {hand_rots[i[1]][2]} {0} 0"
+                        sendToSteamVR(handmsg)
+                        print(handmsg)
 
             time.sleep(0.001)
 

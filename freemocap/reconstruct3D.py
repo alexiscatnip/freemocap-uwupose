@@ -61,8 +61,8 @@ def reconstruct3D(session, data_nCams_nImgPts_XYC, confidenceThreshold=0.8):
     data3d_flat = session.cgroup.triangulate(dataFlat_nCams_nTotalPoints_XY, progress=False)
 
     dataReprojerr_flat = session.cgroup.reprojection_error( data3d_flat, dataFlat_nCams_nTotalPoints_XY, mean=True)
-    print_repro_errors = True
-    if (print_repro_errors):
+    debug_print_repro_errors = False
+    if (debug_print_repro_errors):
         print("reproject errors: " + str(dataReprojerr_flat[1:5]))
     ##return:
     data_fr_mar_xyz = data3d_flat.reshape(nImgPts, 3)

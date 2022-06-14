@@ -1,15 +1,28 @@
 import threading
 from collections import deque
-
 import cv2
-import time
-import pickle
-import os
 import platform
+
+from freemocap import fmc_mediapipe
+from freemocap.fmc_mediapipe import mp_pose
+
+import mediapipe as mp
+mp_drawing = mp.solutions.drawing_utils
+
+mp_drawing_styles = mp.solutions.drawing_styles
+
+def do_inference(image, pose_detector):
+    # do inference on frame.
+    return fmc_mediapipe.runMediaPipe(image, pose_detector)
+
+def parse_inference_results(session, result, camID):
+    # convert results of inteference to shared data format
+    return fmc_mediapipe.parseMediaPipe(session, result, camID)
+
 
 class CamRecordingThread(threading.Thread):
     def __init__(
-        self, session, camID,camInput, beginTime, parameterDictionary,image_out_queue: deque
+        self, session, camID,camInput, beginTime, parameterDictionary,pixel_points_out_queue: deque
     ):
         threading.Thread.__init__(self)
         self.camID = camID
@@ -20,7 +33,7 @@ class CamRecordingThread(threading.Thread):
         self.beginTime = beginTime
         self.parameterDictionary = parameterDictionary
         self.session = session
-        self.image_out_queue = image_out_queue
+        self.pixel_points_out_queue = pixel_points_out_queue
 
     def run(self):
         print("Starting " + self.camID)
@@ -29,7 +42,7 @@ class CamRecordingThread(threading.Thread):
             self.camID,
             self.camInput,
             self.parameterDictionary,
-            self.image_out_queue
+            self.pixel_points_out_queue
         )
 
     def getStamps(self):
@@ -38,7 +51,7 @@ class CamRecordingThread(threading.Thread):
 
 # the recording function that each threaded camera object runs
 def CamRecording(
-    session, camID, camInput, parameterDictionary, image_out_queue
+    session, camID, camInput, parameterDictionary, pixel_points_out_queue
 ):
     """
     Runs the recording process for each threaded camera instance. Saves a video to the RawVideos folder.
@@ -69,9 +82,6 @@ def CamRecording(
     framerate = parameterDictionary.get("framerate")
     codec = parameterDictionary.get("codec")
 
-
-  
-
     cam.set(cv2.CAP_PROP_FRAME_WIDTH, resWidth)
     cam.set(cv2.CAP_PROP_FRAME_HEIGHT, resHeight)
     cam.set(cv2.CAP_PROP_EXPOSURE, exposure)
@@ -88,27 +98,52 @@ def CamRecording(
     else:
         success = False
 
+
+    _mp_pose = mp_pose.Pose(  # create our detector. These are default parameters as used in the tutorial.
+        model_complexity=1,  # in this house, we turn the Speed/Accuracy dial all the way towards accuracy \o/)
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+        smooth_landmarks=True,  # nani kore?
+        static_image_mode=False)  # use 'static image mode' to avoid system getting 'stuck' on ghost skeletons?
+
     while (success):  # while the camera is opened, record the data until the escape button is hit
         if flag:  # when the flag is triggered, stop recording and dump the data
 
             break
         success, frame = cam.read()
 
-        donotrender = True
-        if not donotrender:
-            cv2.imshow(camWindowName, frame)
         # frame_sized = cv2.resize(frame, (resWidth, resHeight))
         # frame_sized = frame
 
-        #pass into Q
-        image_out_queue.append(frame)
+        #inference part start!
+        mediaPipe_data = do_inference(frame, _mp_pose)
+        parsed_results = parse_inference_results(session, mediaPipe_data, camInput) #todo:  list index out of range issue.,
+        #inference part end.
 
+        #pass into Q
+        pixel_points_out_queue.append(parsed_results)
+
+
+
+        debug_donotrender = True
+        if not debug_donotrender:
+            try:
+                if mediaPipe_data is not None:
+                    mp_drawing.draw_landmarks(
+                        frame,
+                        mediaPipe_data.pose_landmarks,
+                        mp_pose.POSE_CONNECTIONS,
+                        landmark_drawing_spec=mp_drawing_styles
+                            .get_default_pose_landmarks_style())
+                cv2.imshow(camWindowName, frame)
+            except:
+                pass
         key = cv2.waitKey(20)
         if key == 27:  # exit on ESC
             flag = True  # set flag to true to shut down all other webcams
             break
     cv2.destroyWindow(camWindowName)
-    return None,None
+    return None, None
 
 
 # this is how we sync our time frames, based on our recorded timestamps

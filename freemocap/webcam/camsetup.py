@@ -7,7 +7,7 @@ import time
 
 import mediapipe as mp
 import numpy as np
-
+from timeit import default_timer as timer
 
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
@@ -109,7 +109,7 @@ class MediaPipeVideoSetup(threading.Thread):
 
         with mp_pose.Pose(
             static_image_mode=False,
-            model_complexity=0,
+            model_complexity=1,
             enable_segmentation=True) as holistic:
 
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, resWidth)
@@ -149,12 +149,18 @@ class MediaPipeVideoSetup(threading.Thread):
                         print(e)
                 
                     annotate_image_with_charuco_data(frame1, charuco_corners, charuco_ids)
-        
+
+
+                    start = timer()
                     frame1.flags.writeable = False
                     try:
                         results = holistic.process(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
                     except Exception as e:
                         print(e)
+
+                    end = timer()
+                    taken = end - start
+
                     mp_drawing.draw_landmarks(
                         frame1,
                         results.pose_landmarks,
@@ -164,10 +170,16 @@ class MediaPipeVideoSetup(threading.Thread):
 
                     if rotNum is not None:
                         frame1 = imutils.rotate_bound(frame1, angle=rotNum)
-                        
-                        
-                    
-                    
+
+                    cv2.putText(
+                        frame1,  # numpy array on which text is written
+                        "time taken for inference: " + str(taken),  # text
+                        (50, 200),  # position at which writing has to start
+                        cv2.FONT_HERSHEY_SIMPLEX,  # font family
+                        .5,  # font size
+                        (200, 200, 200, 255),  # font color
+                        4)  # font stroke (draw a darker heavier font beneath a lighter/thinner copy for readability)
+
                     cv2.imshow(camWindowName, frame1)
                     if cv2.waitKey(1) & 0xFF == 27:
                         # == ord('q') for q

@@ -38,58 +38,42 @@ def setupMediapipe(session, image_streams : List[deque]):
 
         session.eachCameraResolution = eachCameraResolution
 
-def runMediaPipe(session, image_streams : List[deque], mp_poses : List, dummyRun=False):
+def runMediaPipe(image, pose_detector, dummyRun=False):
     """
     Run Mediapipe-pose detector on the camera images
     # Run MediaPipe on synced videos, and save body tracking data to be parsed
     """
 
-    eachCamerasData = []  # Create an empty list that holds each cameras data
-    mediaPipe_dataList = []  # Create an empty list for mediapipes data
-
-    for camera_int, image_queue in enumerate(image_streams):
-        image = None
+    # eachCamerasData = []  # Create an empty list that holds each cameras data
+    # mediaPipe_dataList = []  # Create an empty list for mediapipes data
+    mediaPipe_data = None
+    if image is not None:
+        t1 = time.time()
         try:
-            image = image_queue.pop()  # load first image from video
+            mediaPipe_data = pose_detector.process(
+                cv2.cvtColor(image, cv2.COLOR_BGR2RGB), #Convert the BGR image to RGB before processing
+            )  # NOTE: THIS IS WHERE THE MAGIC HAPENS
         except:
+
             pass
+            """ ^ zprevent limbo when:
+                RuntimeError: CalculatorGraph::Run() failed in Run: 
+                Calculator::Process() for node "poselandmarkbyroicpu__poselandmarksandsegmentat
+                ioninverseprojection__InverseMatrixCalculator" failed: ; Inverse matrix cannot 
+                be calculated.tors/util/inverse_matrix_calculator.cc:38) 
+            """
 
-        if image is not None:
-            t1 = time.time()
-            try:
-                mediaPipe_data = mp_poses[camera_int].process(
-                    cv2.cvtColor(image, cv2.COLOR_BGR2RGB), #Convert the BGR image to RGB before processing
-                )  # NOTE: THIS IS WHERE THE MAGIC HAPENS
-            except:
-                pass
-                """ ^ zprevent limbo when:
-                    RuntimeError: CalculatorGraph::Run() failed in Run: 
-                    Calculator::Process() for node "poselandmarkbyroicpu__poselandmarksandsegmentat
-                    ioninverseprojection__InverseMatrixCalculator" failed: ; Inverse matrix cannot 
-                    be calculated.tors/util/inverse_matrix_calculator.cc:38) 
-                """
-
-            t2 = time.time()
-            # print("Function=%s, Time=%s" % ("inference call took: ", t2 - t1))
-
-        if image is not None:
-            eachCamerasData.append(
-                mediaPipe_data
-            )  # Append that cameras data for every frame to the camera datalist
-        else:
-            eachCamerasData.append(
-                None
-            )  # no image, no detection.
+        t2 = time.time()
+        # print("Function=%s, Time=%s" % ("inference call took: ", t2 - t1))
+    return mediaPipe_data
 
 
-    session.mediaPipeData = eachCamerasData
-
-
-def parseMediaPipe(session):
+def parseMediaPipe(session, mediaPipeData, camIdx):
     """ 
     Parse through saved MediaPipe data, and save out a numpy array of 2D points
+        return: numpy array 33*3 (the last column is visiblitiy)
     """
-    numCams = len(session.mediaPipeData)  # Get number of cameras
+    # numCams = len(session.mediaPipeData)  # Get number of cameras
     # numFrames = len(session.mediaPipeData[0])  # Get number of frames
     # numBodyPoints = len(np.max(session.mediaPipeData[0][:].pose_landmarks.landmark[:]))#Get number of body points
     # numFacePoints = len(np.max(session.mediaPipeData[0][:].face_landmarks.landmark[:]))#Get number of face points
@@ -104,69 +88,67 @@ def parseMediaPipe(session):
     )  # Get total points
 
     # Create  array of nans the size of number of cams, frame, points, XYC
-    mediaPipeData_nCams_nImgPts_XYC = np.empty(
-        (int(numCams), int(numTrackedPoints), 3)
+    mediaPipeData_nImgPts_XYC = np.empty(
+        (int(numTrackedPoints), 3)
     )  # create empty array
-    mediaPipeData_nCams_nImgPts_XYC[:] = np.NaN  # Fill it with NaNs!
+    mediaPipeData_nImgPts_XYC[:] = np.NaN  # Fill it with NaNs!
 
-    for camNum in range(numCams):  # Loop through each camera
+    # for camNum in range(numCams):  # Loop through each camera
         # make empty arrays for thisFrame's data
         # thisFrame_X = np.empty(numTrackedPoints)
         # thisFrame_X[:] = np.nan
         # thisFrame_Y = thisFrame_X.copy()
         # thisFrame_C = thisFrame_X.copy()
 
-        thisFrame_X_body = np.empty(numBodyPoints)
-        thisFrame_X_body[:] = np.nan
-        thisFrame_Y_body = thisFrame_X_body.copy()
-        thisFrame_C_body = thisFrame_X_body.copy()
+    thisFrame_X_body = np.empty(numBodyPoints)
+    thisFrame_X_body[:] = np.nan
+    thisFrame_Y_body = thisFrame_X_body.copy()
+    thisFrame_C_body = thisFrame_X_body.copy()
 
-        fullFrame = True
+    fullFrame = True
 
-        try:
-            if session.mediaPipeData[camNum] is None:
-                thisFrame_X_body = np.empty(33)
-                thisFrame_Y_body = np.empty(33)
-                thisFrame_C_body = np.empty(33)
+    try:
+        if mediaPipeData is None:
+            thisFrame_X_body = np.empty(33)
+            thisFrame_Y_body = np.empty(33)
+            thisFrame_C_body = np.empty(33)
 
-            # pull out ThisFrame's mediapipe data (`mpData.pose_landmarks.landmark` returns something iterable ¯\_(ツ)_/¯)
-            thisFrame_poseDataLandMarks = session.mediaPipeData[camNum]\
-                .pose_landmarks.landmark  # body ('pose') data
-            # stuff body data into pre-allocated nan array
-            thisFrame_X_body[:numBodyPoints] = [
-                pp.x for pp in thisFrame_poseDataLandMarks
-            ]  # PoseX data - Normalized screen coords (in range [0, 1]) - need multiply by image resultion for pixels
-            thisFrame_Y_body[:numBodyPoints] = [
-                pp.y for pp in thisFrame_poseDataLandMarks
-            ]  # PoseY data
-            thisFrame_C_body[:numBodyPoints] = [
-                pp.visibility for pp in thisFrame_poseDataLandMarks
-            ]  #'visibility' is MediaPose's 'confidence' measure in range [0,1]
-        except:
-            fullFrame = False
+        # pull out ThisFrame's mediapipe data (`mpData.pose_landmarks.landmark` returns something iterable ¯\_(ツ)_/¯)
+        thisFrame_poseDataLandMarks = mediaPipeData\
+            .pose_landmarks.landmark  # body ('pose') data
+        # stuff body data into pre-allocated nan array
+        thisFrame_X_body[:numBodyPoints] = [
+            pp.x for pp in thisFrame_poseDataLandMarks
+        ]  # PoseX data - Normalized screen coords (in range [0, 1]) - need multiply by image resultion for pixels
+        thisFrame_Y_body[:numBodyPoints] = [
+            pp.y for pp in thisFrame_poseDataLandMarks
+        ]  # PoseY data
+        thisFrame_C_body[:numBodyPoints] = [
+            pp.visibility for pp in thisFrame_poseDataLandMarks
+        ]  #'visibility' is MediaPose's 'confidence' measure in range [0,1]
+    except:
+        fullFrame = False
 
-        if fullFrame:
-            f = 9
+    if fullFrame:
+        f = 9
 
-        thisFrame_X = thisFrame_X_body
-        thisFrame_Y = thisFrame_Y_body
-        thisFrame_C = thisFrame_C_body
-        # stuff this frame's data into pre-allocated mediaPipeData_.... array
-        mediaPipeData_nCams_nImgPts_XYC[camNum, :, 0] = thisFrame_X
-        mediaPipeData_nCams_nImgPts_XYC[camNum, :, 1] = thisFrame_Y
-        mediaPipeData_nCams_nImgPts_XYC[camNum, :, 2] = thisFrame_C
-
+    thisFrame_X = thisFrame_X_body
+    thisFrame_Y = thisFrame_Y_body
+    thisFrame_C = thisFrame_C_body
+    # stuff this frame's data into pre-allocated mediaPipeData_.... array
+    mediaPipeData_nImgPts_XYC[:, 0] = thisFrame_X
+    mediaPipeData_nImgPts_XYC[:, 1] = thisFrame_Y
+    mediaPipeData_nImgPts_XYC[:, 2] = thisFrame_C
 
     # convert from normalized screen coordinates to pixel coordinates
-    for camera in range(numCams):
-        mediaPipeData_nCams_nImgPts_XYC[camera, :, 0] *= session.cgroup.cameras[camera].get_size()[0] # get the dimension from the cgroup directly. - that is the one used for triangulation and calculation of reproection error
-        mediaPipeData_nCams_nImgPts_XYC[camera, :, 1] *= session.cgroup.cameras[camera].get_size()[1]
+    mediaPipeData_nImgPts_XYC[:, 0] *= session.cgroup.cameras[camIdx].get_size()[0] # get the dimension from the cgroup directly. - that is the one used for triangulation and calculation of reproection error
+    mediaPipeData_nImgPts_XYC[:, 1] *= session.cgroup.cameras[camIdx].get_size()[1]
 
     # mediaPipeData_nCams_nImgPts_XYC[:, 34:, 2] = 1 #sets the non-body point to '1'
 
     # np.save(session.dataArrayPath / "mediaPipeData_2d.npy", mediaPipeData_nCams_nImgPts_XYC,)
 
-    return mediaPipeData_nCams_nImgPts_XYC
+    return mediaPipeData_nImgPts_XYC
 
 # #def parseMediaPipe2(session):
 
