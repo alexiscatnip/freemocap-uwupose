@@ -93,13 +93,6 @@ def parseMediaPipe(session, mediaPipeData, camIdx):
     )  # create empty array
     mediaPipeData_nImgPts_XYC[:] = np.NaN  # Fill it with NaNs!
 
-    # for camNum in range(numCams):  # Loop through each camera
-        # make empty arrays for thisFrame's data
-        # thisFrame_X = np.empty(numTrackedPoints)
-        # thisFrame_X[:] = np.nan
-        # thisFrame_Y = thisFrame_X.copy()
-        # thisFrame_C = thisFrame_X.copy()
-
     thisFrame_X_body = np.empty(numBodyPoints)
     thisFrame_X_body[:] = np.nan
     thisFrame_Y_body = thisFrame_X_body.copy()
@@ -145,8 +138,6 @@ def parseMediaPipe(session, mediaPipeData, camIdx):
     mediaPipeData_nImgPts_XYC[:, 1] *= session.cgroup.cameras[camIdx].get_size()[1]
 
     # mediaPipeData_nCams_nImgPts_XYC[:, 34:, 2] = 1 #sets the non-body point to '1'
-
-    # np.save(session.dataArrayPath / "mediaPipeData_2d.npy", mediaPipeData_nCams_nImgPts_XYC,)
 
     return mediaPipeData_nImgPts_XYC
 

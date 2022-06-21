@@ -8,20 +8,20 @@ console=Console()
 # @jit(nopython=True)
 def reconstruct3D(session, data_nCams_nImgPts_XYC, confidenceThreshold=0.8):
     """
-    Take a specifically formatted data array, and based on the camera calibration yaml, reconstruct a 3D image
+    Take a specifically formatted data array, and based on the cameras'
+    calibration.toml, reconstruct 3D key-points
     """
 
     if (
         session.cgroup is None
-    ):  # load the calibration settings into the session class if it hasn't been already
-        calibrationFile = "{}_calibration.toml".format(session.sessionID)
-        session.cameraConfigFilePath = session.sessionPath / calibrationFile
-        session.cgroup = fmc_anipose.CameraGroup.load(session.cameraConfigFilePath)
+    ):  # looks like we failed to load the calibration.toml in an earlier stage
+        return None, None
 
     nCams, nImgPts, nDims = data_nCams_nImgPts_XYC.shape
 
     if nCams == 1:
         print("called reconstruct3d on dataArray that has data from only 1 camera.")
+        return None, None
 
     if nDims == 3:
         dataOG = data_nCams_nImgPts_XYC.copy()
@@ -34,21 +34,6 @@ def reconstruct3D(session, data_nCams_nImgPts_XYC, confidenceThreshold=0.8):
 
             thisCamX[thisCamConf < confidenceThreshold] = np.nan
             thisCamY[thisCamConf < confidenceThreshold] = np.nan
-            #
-            # if session.debug:
-            #     import matplotlib.pyplot as plt
-            #     fig = plt.figure(8000+camNum)
-            #     fig.suptitle("3d reconstruction Confidence thresholding - cam{}".format(camNum))
-            #     axOG = fig.add_subplot(1,2,1)
-            #     axOG.imshow(dataOG[0,:,0])
-            #     axOG.set_title("Original Data")
-            #     axTh = fig.add_subplot(1,2,2)
-            #     axTh.imshow(thisCamX)
-            #     axTh.set_title("Thresholded Data (there should be NEW and EXCITING gaps :O")
-            #
-
-                
-
 
     if nDims == 2:
         data_nCams_nImgPts_XY = data_nCams_nImgPts_XYC
@@ -60,12 +45,13 @@ def reconstruct3D(session, data_nCams_nImgPts_XYC, confidenceThreshold=0.8):
     # console.print('Reconstructing 3d points...')
     data3d_flat = session.cgroup.triangulate(dataFlat_nCams_nTotalPoints_XY, progress=False)
 
-    dataReprojerr_flat = session.cgroup.reprojection_error( data3d_flat, dataFlat_nCams_nTotalPoints_XY, mean=True)
-    debug_print_repro_errors = False
-    if (debug_print_repro_errors):
-        print("reproject errors: " + str(dataReprojerr_flat[1:5]))
-    ##return:
+    dataReprojerr_flat = session.cgroup.reprojection_error(data3d_flat, dataFlat_nCams_nTotalPoints_XY, mean=True)
+    dataReprojerr_C_N_2 = \
+        session.cgroup.reprojection_error(data3d_flat,
+                                          dataFlat_nCams_nTotalPoints_XY,
+                                          mean=False)
+
     data_fr_mar_xyz = data3d_flat.reshape(nImgPts, 3)
     dataReprojErr = dataReprojerr_flat.reshape(nImgPts)
 
-    return data_fr_mar_xyz, dataReprojErr
+    return data_fr_mar_xyz, dataReprojErr, dataReprojerr_C_N_2

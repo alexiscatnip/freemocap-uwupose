@@ -180,6 +180,8 @@ def get_rot_hands(pose3d):
     return l_hand_rot, r_hand_rot
 
 def get_rot_mediapipe(pose3d):
+    print ("triangulation app variant not able to obtain feet rotation from ML side. ")
+
     hip_left = pose3d[2]
     hip_right = pose3d[3]
     hip_up = pose3d[16]
@@ -240,7 +242,6 @@ def get_rot_mediapipe(pose3d):
     
 
 def get_rot(pose3d):
-
     ## guesses
     hip_left = 2
     hip_right = 3

@@ -7,13 +7,21 @@ from statistics import mean
 import numpy
 from scipy.signal import savgol_filter
 
-from src.helpers import sendToSteamVR, mediapipe33To3dpose, get_rot, get_rot_mediapipe, get_rot_hands
-
+from freemocap import parameters
+from src.helpers import sendToSteamVR, mediapipe33To3dpose, get_rot, \
+    get_rot_mediapipe, get_rot_hands
+from scipy.spatial.transform import Rotation as R
 import time
 import winsound
 
 
 def pose_ok(pose3d):
+    """
+    return true only if important joints are OK.
+
+    happens when one of the filtering step has removed it due to
+    reprojection error.
+    """
     hip_left = 2
     hip_right = 3
     hip_up = 16
@@ -23,6 +31,21 @@ def pose_ok(pose3d):
 
     ankle_left = 0
     ankle_right = 5
+
+    if numpy.isnan(pose3d[ankle_left]).any():
+        print("ankle_left is NaN")
+    if numpy.isnan(pose3d[ankle_right]).any():
+        print("ankle_right is NaN")
+    if numpy.isnan(pose3d[knee_left]).any():
+        print("knee_left is NaN")
+    if numpy.isnan(pose3d[knee_right]).any():
+        print("knee_right is NaN")
+    if numpy.isnan(pose3d[hip_up]).any():
+        print("hip_up is NaN")
+    if numpy.isnan(pose3d[hip_left]).any():
+        print("hip_left is NaN")
+    if numpy.isnan(pose3d[hip_right]).any():
+        print("hip_right is NaN")
 
     is_ok = not numpy.isnan(pose3d[ankle_left]).any() and \
             not numpy.isnan(pose3d[ankle_right]).any() and \
@@ -35,24 +58,50 @@ def pose_ok(pose3d):
 
 
 def set_basestations(session):
-    calib_units_to_meters = 1000 # use 1000 if you calibrated in mm
+    calib_units_to_meters = 1000  # use 1000 if you calibrated in mm
     for idx, camera in enumerate(session.cgroup.cameras):
-        Tvec = camera.get_translation() # numpy size 3.  in mm? since we calibed in mm.
+        Tvec = camera.get_translation()  # numpy size 3.  in mm? since we calibed in mm.
 
         # pose3d[:, 0] = -pose3d[:, 0]  # flip the points a bit since steamvrs coordinate system is a bit diffrent
         # pose3d[:, 1] = -pose3d[:, 1]
 
         res = sendToSteamVR("addstation")
         print(res)
-        tosend = f"updatestation {idx} {-Tvec[0]/calib_units_to_meters} {-Tvec[1]/calib_units_to_meters} {Tvec[2]/calib_units_to_meters} 1 0 0 0"
-        res = sendToSteamVR(tosend) # right ('east'), elevation (up), backward (south)
+        tosend = f"updatestation {idx} {-Tvec[0] / calib_units_to_meters} {-Tvec[1] / calib_units_to_meters} {Tvec[2] / calib_units_to_meters} 1 0 0 0"
+        res = sendToSteamVR(
+            tosend)  # right ('east'), elevation (up), backward (south)
         print(res)
 
+
+def writeHeaders(writer):
+    the_row = ["counter"]
+    for idx in range(29):
+        the_row.extend([f"Pose{idx},x",
+                        f"Pose{idx},y",
+                        f"Pose{idx},z"])
+    for idx in range(29):
+        the_row.extend([f"MeanReprojectionError{idx}"])
+
+    the_row.extend(["frametime"])
+    writer.writerow(the_row)
+
+
 class SteamVRThread(threading.Thread):
-    def __init__(self, queue_3d_points : deque, session):
+    """
+    thread managing in/output to SteamVR driver
+    my inputs: points to send to VR
+    my outputs: the HMD pose from the user's headset.
+    """
+
+    def __init__(self,
+                 queue_3d_points_to_SteamVR: deque,
+                 queue_3d_poses_from_SteamVR: deque,
+                 session):
         threading.Thread.__init__(self)
-        self.queue_3d_points = queue_3d_points
+        self.queue_3d_points_to_SteamVR = queue_3d_points_to_SteamVR
+        self.queue_3d_poses_from_SteamVR = queue_3d_poses_from_SteamVR
         self.session = session
+        self.params = session.params
 
         # 1. initialise steamVR connection - keep looping until ok.
         self.steamVR_found = False
@@ -63,8 +112,8 @@ class SteamVRThread(threading.Thread):
         # set cameras (for debug purposes only -- since we are not calibrating ourselves with respect to the steamVR frame, the cameras postions will be very offset.)
         # set_basestations(session)
 
-        session.use_hands = True
-        if session.use_hands:
+        self.session.use_hands = False
+        if self.session.use_hands:
             self.total_trackers = 5
         else:
             self.total_trackers = 3
@@ -74,24 +123,28 @@ class SteamVRThread(threading.Thread):
         # for i in range(self.other_trackers):
         #     roles.append("None")
 
-        roles = ["TrackerRole_Waist", "TrackerRole_RightFoot", "TrackerRole_LeftFoot", None, None]
+        roles = ["TrackerRole_Waist", "TrackerRole_RightFoot",
+                 "TrackerRole_LeftFoot"]
         # 2. initialise our trackers in steamVR
         if True:
             for i in range(self.num_trackers, self.total_trackers):
                 # adding a tracker into VR.
-                resp = sendToSteamVR(f"addtracker MediaPipeTracker{i} {roles[i]}")
+                resp = sendToSteamVR(
+                    f"addtracker MediaPipeTracker{i} {roles[i]}")
                 while "error" in resp:
-                    resp = sendToSteamVR(f"addtracker MediaPipeTracker{i} {roles[i]}")
+                    resp = sendToSteamVR(
+                        f"addtracker MediaPipeTracker{i} {roles[i]}")
                     print("error adding tracker")
                     print(resp)
                     time.sleep(0.2)
                 time.sleep(0.2)
 
-            self.params = {}
-            self.params['smoothing'] = 0
-            self.params['additional_smoothing'] = 0
-            self.camera_latency = 0.0 #300ms?
-            resp = sendToSteamVR(f"settings 50 {self.params['smoothing']} {self.params['additional_smoothing']}")
+            self.params.smoothing = 0
+            self.params.additional_smoothing = 0
+            self.camera_latency = 0.0  # 300ms?
+            resp = sendToSteamVR(f"settings 50 "
+                                 f"{self.params.smoothing} "
+                                 f"{self.params.additional_smoothing}")
             # print("settings returned this: ")
             # print(resp)
             # while "error" in resp:
@@ -107,97 +160,131 @@ class SteamVRThread(threading.Thread):
         """run the thread."""
         # 3. send 3D pose data stream to vr:
         lastSentTime = time.time()
-        while True:
-            try:
-                points_3D = self.queue_3d_points.pop() # 33*3
-                #wrap the points back into mediapipe-pose data 'pose_landmarks"' structure
 
-            except:
-                points_3D = None
+        writeToCsv = False
+        if (writeToCsv):
+            f = open('steamVROutput_log.csv', 'w')
+            import csv
+            writer = csv.writer(f)
+            writeHeaders(writer)
+        frame_count = 0
+        try:
+            stop_flag = False
+            while not stop_flag:
+                stop_flag = self.session.params.exit_ready
 
-            calibration_scale_factor = 1000 # since we calibrated in units of mm, we should divide by 1000 to obtain meters, which is the units used in steamVR.
-            if points_3D is not None:
-                pose3d = mediapipe33To3dpose(points_3D)
-                pose3d /= calibration_scale_factor
+                try:
+                    pose3d, rots, reprojectionerror = \
+                        self.queue_3d_points_to_SteamVR.pop()  # 33*3
 
-                """wtf is this?"""
-                pose3d[:, 0] = -pose3d[:, 0]  # flip the points a bit since steamvrs coordinate system is a bit diffrent
-                pose3d[:, 1] = -pose3d[:, 1]
+                except:
+                    pose3d = None
+                    reprojectionerror = None
+                    rots = None
 
-                pose3d_og = pose3d.copy()
-                # params.pose3d_og = pose3d_og
+                # to steamVR
+                if pose3d is not None:
+                    # if not pose_ok(pose3d):
+                    #     # print("failed to triangulate lower body for this frame.")
+                    #     self.is_beeping = True
+                    #     winsound.PlaySound('sound.wav',
+                    #                        winsound.SND_FILENAME | winsound.SND_ASYNC)
+                    #     continue
 
-                # for j in range(pose3d.shape[0]):  # apply the rotations from the sliders
-                #     pose3d[j] = params.global_rot_z.apply(pose3d[j])
-                #     pose3d[j] = params.global_rot_x.apply(pose3d[j])
-                #     pose3d[j] = params.global_rot_y.apply(pose3d[j])
+                    # filter_memory
+                    # # smooth it.
+                    # smoothWinLength = 5
+                    # smoothOrder = 3
+                    # for dim in range(pose3d.shape[1]):
+                    #     for mm in range(pose3d.shape[0]):
+                    #         pose3d[mm, dim] = savgol_filter(
+                    #             pose3d[mm, dim], smoothWinLength, smoothOrder)
 
-                if not pose_ok(pose3d):
-                    # print("failed to triangulate lower body for this frame.")
-                    self.is_beeping = True
-                    winsound.PlaySound('sound.wav', winsound.SND_FILENAME |  winsound.SND_ASYNC)
-                    continue
+                    # send feet and hip
+                    frameTime = time.time() - lastSentTime
+                    last_frame_times.append(frameTime)
+                    if (writeToCsv):
+                        line = [frame_count]
+                        frame_count += 1
+                        flat = pose3d.flatten()
+                        flat = flat.tolist()
+                        line = line + flat
 
-                # filter_memory
+                        line = line + reprojectionerror.tolist()
 
-                # # smooth it.
-                # smoothWinLength = 5
-                # smoothOrder = 3
-                # for dim in range(pose3d.shape[1]):
-                #     for mm in range(pose3d.shape[0]):
-                #         pose3d[mm, dim] = savgol_filter(
-                #             pose3d[mm, dim], smoothWinLength, smoothOrder)
+                        line = line + [frameTime]
+                        writer.writerow(line)
 
-                self.params['feet_rotation'] = False
-                if not self.params['feet_rotation']:
-                    rots = get_rot(pose3d)  # get rotation data of feet and hips from the position-only skeleton data
+                    lastSentTime = time.time()
+                    print("FPS : " + str(1 / mean(last_frame_times)))
+                    for i in [(0, 1), (5, 2), (6, 0)]:
+                    # for i in [(6, 0)]:
+                        joint = pose3d[i[0]]
+                        # words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {-frameTime - self.camera_latency} 0.0"
+                        words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {0} 0"
+                        res = sendToSteamVR(words)
+                        print(words)
+
+                    if self.session.use_hands:
+                         hand_rots = get_rot_hands(pose3d)
+                         for i in [(10, 0), (15, 1)]:
+                         # for i in [(10, 0)]:
+                             joint = pose3d[i[
+                                 0]]  # for each foot and hips, offset it by skeleton position and send to steamvr
+                             handmsg = f"updatepose {i[1] + 1} {joint[0]} {joint[1]} {joint[2]} {hand_rots[i[1]][3]} {hand_rots[i[1]][0]} {hand_rots[i[1]][1]} {hand_rots[i[1]][2]} {0} 0"
+                             sendToSteamVR(handmsg)
+                             # print(handmsg)
+
+                # from steamvr
+                array = sendToSteamVR("getdevicepose 0")
+                if "error" in array:
+                    pass
                 else:
-                    rots = get_rot_mediapipe(pose3d)
 
-                # send feet and hip
-                frameTime = time.time() - lastSentTime
-                last_frame_times.append(frameTime)
-                lastSentTime = time.time()
-                print("FPS : " + str(1/mean(last_frame_times)))
-                # for i in [(0, 1), (5, 2), (6, 0)]:
-                for i in [(6, 0)]:
-                    joint = pose3d[i[0]]
-                    # words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {-frameTime - self.camera_latency} 0.0"
-                    words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {0} 0"
-                    res = sendToSteamVR(words)
-                    print(words)
+                    headsetpos = [float(array[3]), float(array[4]),
+                                  float(array[5])]
+                    headsetrot = R.from_quat(
+                        [float(array[7]), float(array[8]), float(array[9]),
+                         float(array[6])])
 
-                if self.session.use_hands:
-                    hand_rots = get_rot_hands(pose3d)
-                    # for i in [(10, 0), (15, 1)]:
-                    for i in [(10, 0)]:
-                        joint = pose3d[i[0]] # for each foot and hips, offset it by skeleton position and send to steamvr
-                        handmsg = f"updatepose {i[1] + 1} {joint[0]} {joint[1]} {joint[2]} {hand_rots[i[1]][3]} {hand_rots[i[1]][0]} {hand_rots[i[1]][1]} {hand_rots[i[1]][2]} {0} 0"
-                        sendToSteamVR(handmsg)
-                        print(handmsg)
+                    neckoffset = headsetrot.apply(
+                        [0, -0.2,
+                         0.1])  # the neck position seems to be the best point to allign to, as its well defined on
+                    # the skeleton (unlike the eyes/nose, which jump around) and can be calculated from hmd.
+                    self.queue_3d_poses_from_SteamVR.append([headsetpos,
+                                                             headsetrot])
 
-            time.sleep(0.001)
+                time.sleep(0.001)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            if writeToCsv:
+                f.close()
 
     def connect_to_steamVR(self):
         use_steamvr = True
         if use_steamvr:
-            print("Connecting to SteamVR...")
+            while True:
+                print("Connecting to SteamVR...")
 
-            # ask the driver, how many devices are connected to ensure we dont add additional trackers
-            # if not, we try again
-            self.num_trackers = sendToSteamVR("numtrackers")
-            for i in range(10):
+                # ask the driver, how many devices are connected to ensure we dont add additional trackers
+                # if not, we try again
+                self.num_trackers = sendToSteamVR("numtrackers")
+                for i in range(10):
+                    if "error" in self.num_trackers:
+                        print("Error in SteamVR connection. Retrying...")
+                        time.sleep(1)
+                        self.num_trackers = sendToSteamVR("numtrackers")
+                    else:
+                        break
+
                 if "error" in self.num_trackers:
-                    print("Error in SteamVR connection. Retrying...")
-                    time.sleep(1)
-                    self.num_trackers = sendToSteamVR("numtrackers")
+                    print("Could not connect to SteamVR after 10 retries!")
+                    print(
+                        "Will sleep for 10s before trying to contact SteamVR again")
+                    time.sleep(10)
                 else:
-                    break
-
-            if "error" in self.num_trackers:
-                print("Could not connect to SteamVR after 10 retries!")
-                print("Will sleep for 10s before trying to contact SteamVR again")
-                time.sleep(10)
+                    break  # exit of this infinite loop.
 
             self.num_trackers = int(self.num_trackers[2])
             self.steamVR_found = True
