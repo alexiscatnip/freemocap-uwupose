@@ -57,20 +57,49 @@ def pose_ok(pose3d):
     return is_ok
 
 
-def set_basestations(session):
-    calib_units_to_meters = 1000  # use 1000 if you calibrated in mm
+def initialise_basestations(session):
+    for idx, camera in enumerate(session.cgroup.cameras):
+        # Tvec = camera.get_translation()  # numpy size 3.  in mm? since we calibed in mm.
+        #
+        # Tvec[0] = -Tvec[0]  # flip the points a bit since steamvrs coordinate system is a bit diffrent
+        # Tvec[1] = -Tvec[1]
+        #
+        # Tvec /= 1000
+
+        res = sendToSteamVR("addstation")
+        # tosend = f"updatestation {idx} {Tvec[0]} {Tvec[1]} {Tvec[2]} 1 0 0 0"
+        # res = sendToSteamVR(
+        #     tosend)  # right ('east'), elevation (up), backward (south)
+
+def set_basestations_pos(session):
     for idx, camera in enumerate(session.cgroup.cameras):
         Tvec = camera.get_translation()  # numpy size 3.  in mm? since we calibed in mm.
 
-        # pose3d[:, 0] = -pose3d[:, 0]  # flip the points a bit since steamvrs coordinate system is a bit diffrent
-        # pose3d[:, 1] = -pose3d[:, 1]
+        Tvec = Tvec.copy() # don't accidentally modify cgroup.
+        Tvec[0] = -Tvec[0]  # flip the points a bit since steamvrs coordinate system is a bit diffrent
+        Tvec[1] = -Tvec[1]
 
-        res = sendToSteamVR("addstation")
-        print(res)
-        tosend = f"updatestation {idx} {-Tvec[0] / calib_units_to_meters} {-Tvec[1] / calib_units_to_meters} {Tvec[2] / calib_units_to_meters} 1 0 0 0"
-        res = sendToSteamVR(
-            tosend)  # right ('east'), elevation (up), backward (south)
-        print(res)
+        Tvec_meters = Tvec / 1000
+
+        Tvec_meters = session.params.global_rot_z.apply(Tvec_meters)
+        Tvec_meters = session.params.global_rot_x.apply(Tvec_meters)
+        Tvec_meters = session.params.global_rot_y.apply(Tvec_meters)
+
+        Tvec_meters += session.offset
+
+        # tosend = f"updatestation {idx} {Tvec_meters[0]} {Tvec_meters[1]} {Tvec_meters[2]} 1 0 0 0"
+        # print(tosend)
+        # res = sendToSteamVR(tosend)
+        #
+        # while "idinvalid" in res:
+        #     #add tracker and update it.
+        #     res = sendToSteamVR("addstation")
+        #     time.sleep(0.5)
+        #     tosend = f"updatestation {idx} {Tvec_meters[0]} {Tvec_meters[1]} {Tvec_meters[2]} 1 0 0 0"
+        #     res = sendToSteamVR(tosend)
+
+        # right ('east'), elevation (up), backward (south)
+
 
 
 def writeHeaders(writer):
@@ -109,8 +138,6 @@ class SteamVRThread(threading.Thread):
             self.connect_to_steamVR()
             time.sleep(1)
 
-        # set cameras (for debug purposes only -- since we are not calibrating ourselves with respect to the steamVR frame, the cameras postions will be very offset.)
-        # set_basestations(session)
 
         self.session.use_hands = False
         if self.session.use_hands:
@@ -153,6 +180,10 @@ class SteamVRThread(threading.Thread):
             #     time.sleep(1)
         self.is_beeping = False
 
+        # create cameras (for debug purposes only -- since we are not
+        # calibrating ourselves with respect to the steamVR frame, the cameras postions will be very offset.)
+        # initialise_basestations(session)
+
     def run(self):
         # filter_memory = deque(maxlen = 5)
         last_frame_times = deque(maxlen=20)
@@ -168,6 +199,7 @@ class SteamVRThread(threading.Thread):
             writer = csv.writer(f)
             writeHeaders(writer)
         frame_count = 0
+        count = 0
         try:
             stop_flag = False
             while not stop_flag:
@@ -183,7 +215,9 @@ class SteamVRThread(threading.Thread):
                     rots = None
 
                 # to steamVR
-                if pose3d is not None:
+                if (pose3d is not None ) and (pose_ok(pose3d)): # dont send
+                    # if we are fucked!
+
                     # if not pose_ok(pose3d):
                     #     # print("failed to triangulate lower body for this frame.")
                     #     self.is_beeping = True
@@ -254,6 +288,10 @@ class SteamVRThread(threading.Thread):
                     self.queue_3d_poses_from_SteamVR.append([headsetpos,
                                                              headsetrot])
 
+                if count % 200 == 0:
+                    # sent base station position
+                    set_basestations_pos(self.session)
+                count += 1
                 time.sleep(0.001)
         except KeyboardInterrupt:
             pass

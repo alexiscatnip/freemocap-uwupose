@@ -134,8 +134,11 @@ def parseMediaPipe(session, mediaPipeData, camIdx):
     mediaPipeData_nImgPts_XYC[:, 2] = thisFrame_C
 
     # convert from normalized screen coordinates to pixel coordinates
-    mediaPipeData_nImgPts_XYC[:, 0] *= session.cgroup.cameras[camIdx].get_size()[0] # get the dimension from the cgroup directly. - that is the one used for triangulation and calculation of reproection error
-    mediaPipeData_nImgPts_XYC[:, 1] *= session.cgroup.cameras[camIdx].get_size()[1]
+    mediaPipeData_nImgPts_XYC[:, 0] *= 1920
+    # asdf = session.cgroup.cameras[1].get_size()[0] # get the dimension from
+    # the cgroup directly. - that is the one used for triangulation and calculation of reproection error
+    mediaPipeData_nImgPts_XYC[:, 1] *= 1080 #session.cgroup.cameras[
+    # camIdx].get_size()[1]
 
     # mediaPipeData_nCams_nImgPts_XYC[:, 34:, 2] = 1 #sets the non-body point to '1'
 
