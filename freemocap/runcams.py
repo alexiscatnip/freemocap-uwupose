@@ -237,7 +237,7 @@ class UwuRuntime:
             # session.mediaPipeSkel_Reprojerr_C_N_2
 
             # if reprojection error too high, drop the points.
-            repro_error_thresh = 40
+            repro_error_thresh = 400
             for idx, repro_error in enumerate(session.mediaPipeSkel_reprojErr):
                 if repro_error > repro_error_thresh:
                     session.mediaPipeSkel_fr_mar_xyz[idx, :] = np.NaN
