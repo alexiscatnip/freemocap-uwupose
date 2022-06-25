@@ -95,10 +95,14 @@ Conclusion
   * now, go ahead to 'start working'
     * you should see cameras image and your joint detected in real-time.
     * you should see that the 3d trackers have spawned in steamVR.
+      * They may be far away, slanted, facing up, left, whatever.
+        * But if you raise your foot and it seems to match up, you know your 
+          extrinsic calibration is ok!
       * if they dont appear there is a few reasons:
         * possible the trackers are > 10m away from origin of SteamVR. The 
-          driver is filtering those data out.
-        * possible the trackers are in strange location that you simply 
+          driver is filtering those data out. this really should not happen 
+          if your Camera_0 is at (0,0,0)
+        * possible the trackers are in strange location that SteamVR 
           can't render.
         * possible the triangulation (esp. extrinsics!) is totally wrong. 
           this will cause the triangulation to have very high reprojection 
@@ -106,11 +110,13 @@ Conclusion
           * To solve this, god help you (really, I don't know how to fix a 
             bad extrinsic calibration except for trying hard to redo 
             calibration!)
-    * you should see the ui screen same like mediapipe-pose-VR repo.
+    * you should see the ui screen, same like in mediapipe-pose-VR repo.
+      * warn: only the calibrate and neck offset button works at this time. 
       * stand straight in front of the cameras, click the button 'calibrate'
       * observe the sliders at the top have moved. calibration has been done.
-      * now go back to vr and observe your trackers are at the right position.
-* with the trackers in a correct position (ankle and hip), lauch your game 
+      * now go back to vr and observe your trackers are at the correct
+        position, matching your body.
+* with the trackers tracking your body (ankle and hip), lauch your game 
   and do the normal calibration in-game just like normal trackers.
 * enjoy your crappy 10hz tracking with only cameras! :D
 
