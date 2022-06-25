@@ -54,9 +54,21 @@ def runMediaPipe(image, pose_detector, dummyRun=False):
                 cv2.cvtColor(image, cv2.COLOR_BGR2RGB), #Convert the BGR image to RGB before processing
             )  # NOTE: THIS IS WHERE THE MAGIC HAPENS
         except:
+            # this means that the mediapipe has encountered a really bad
+            # error on their side. we can create another pose_detector.
 
-            pass
-            """ ^ zprevent limbo when:
+            # I imagine the original one is GC-ed? if not we will get memory
+            # leak :)
+            print("WARN: Mediapipe crashed and we created another instance "
+                  "of it.")
+            pose_detector = mp_pose.Pose(
+                model_complexity=1,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
+                smooth_landmarks=False,
+                static_image_mode=False)
+
+            """ the exception clause is due to this rare bug on MP side:
                 RuntimeError: CalculatorGraph::Run() failed in Run: 
                 Calculator::Process() for node "poselandmarkbyroicpu__poselandmarksandsegmentat
                 ioninverseprojection__InverseMatrixCalculator" failed: ; Inverse matrix cannot 
