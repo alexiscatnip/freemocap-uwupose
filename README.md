@@ -1,22 +1,129 @@
 
-https://user-images.githubusercontent.com/15314521/124694557-8069ea00-deaf-11eb-9328-3be27a4b1ea4.mp4
+## Uwupose experiment repo
+We perform Foot and Hip tracking for steamVR in real-time. Using only 
+ML and cameras. no trackers attached.
 
-# This is all very much a work in progress! More to come!
-## (As of May 2022) We're currently working on building a proper API with documentation, but for now enjoy this pile of not-quite-spaghetti-but-definitely-lasagna-flavored code and sloppy ReadMe 😅
+*"Highly experimental, mostly impractical - you have been warned!"*
 
-___________________________________
-___
+**Demo**
 
-## Prerequisites - 
-**Required**
-* Windows only for now (sorry! Mac and Linux support coming very soon!😅)
-* A Python 3.7 environment - 
-  * We recommend installing Anaconda from here (https://www.anaconda.com/products/individual#Downloads) to create your Python environment.
+Uwupose is able to simulate ankle and hip trackers at 10-12hz with 2 cameras.
 
-* Two or more USB webcams attached to viable USB ports 
-	*  ~~USB hubs typically don't work~~ I think they do now? 
-	*  Note that two cameras is the **minimum** required for 3d reconstruction. However, with just two views, many points will be occluded/not visible to both cameras. For better performance, use three (or four or more?) cameras
-* Each camera must get a clean unobstructed view of a Charuco board at some (See below).
+It estimates your pose in 2D from 2 camera image streams, then performs 
+triangulation to 
+estimate your overall 3D pose.
+
+![Chair Foot raises](./docs/img/chair.gif)
+
+**Performance**
+
+Benchmark/Dev machine
+- i5 4670k
+- 16gb ram
+- GTX 1060 3GB
+  
+Results
+- 10 fps leg-and-hip poses to steamVR
+- 450ms of end-to-end latency (130ms is webcam latency)
+- 40-50% CPU usage in task manager (on a 4 core CPU)
+- 400MB of ram is used. (good result)
+
+Conclusion
+- poor performance on 4 core CPU, 10 year-old.
+  - I would like to test on one of those 6/8 core CPUs of today.
+- Running multiple mediapipe-pose solutions on different threads is 
+  probably not the correct way;
+  - cpu usage goes up linearly (expected)
+  - the FPS of inference reduces drastically; to half. (unexpected!)
+  - This means that despite CPU doing 2x the work, the performance is drop 
+    drastically. Something is blocking.
+- running 3 mediapipe pose pipelines will cause steamVR to stutter badly and 
+  take up 70-80% cpu. VRChat will crash. Main thread keeps getting 
+  timeout-ed (in steamvr, Now loading... appears).
+  - Running 2 MP-pose barely allows me to load the VRchat world.
+- memory usage is a non-issue.
+- MP pose is very bad when the face is not visible. 
+- MP pose often thinks I am facing the opposite direction if the face is not 
+  visible.
+- It is very very difficult to get a correct extrinsic calibration of the 
+  cameras. It is even more difficult to figure out/ visualise/ ascertain that 
+  these numbers are correct!
+
+**High level of Uwupose**
+1. Setup
+   * Input: mounted webcams.
+   * Use Charuco board and [multical](https://github.com/oliver-batchelor/multical) to obtain the cameras' intrinsic and 
+     extrinsic matrix (required to do triangulation)
+2. ML inference
+   * Use mediapipe (2D pose estimation) to get person's pose in image
+3. Triangulation
+   * Do triangulation using the outputs of stage 1 and 2. 
+   * Use Aniposelib API (C * 2D image points -> 3D world points)
+4. (not in picture)
+   * rotate, translate the world points to match the headset's reported 
+     position.
+   * send to steamVR (use driver from Apriltag tracker repo)
+
+![Drawing out the main ideas](./docs/img/uwupose.png)
+
+
+**Development environment**
+* Windows 10
+* Python 3.7 anaconda env. 
+* Two USB webcams attached to DIFFERENT USB ports/hub/buses 
+
+
+**How to run it?**
+* setup freemocap from the original repo. (install their dependencies)
+* Install the 'Apriltag tracker driver' that [Mediapipe-VR-Fullbody-Tracking](https://github.com/ju1ce/Mediapipe-VR-Fullbody-Tracking) is using 
+* obtain intrinsic and extrinsic calibration of at least 2 cameras. 
+  * What worked:
+    * I used [multical](https://github.com/oliver-batchelor/multical)
+      * So the funny thing is that this repo outputs the correct coordinate 
+        system. However, you need to convert the rotation_matrix like this:
+        * use Scipy `Rotation.toRotationVector(result_Rotation_matrix)`
+  * What not work
+    * I tried argus and wandsomething, I don't know what its doing.
+    * The future is obviously wand calibration or something like that, 
+      instead of the clunky charuco board
+  * your results, put them in the file `calibration.toml` 
+* now run freemocap_runme_script.py of this repo.
+  * choose your cameras from the list.
+    * choose the top radio button to see that the cameras are opened in the 
+      right 
+      ordering - same order as the `calibration.toml`
+  * now, go ahead to 'start working'
+    * you should see cameras image and your joint detected in real-time.
+    * you should see that the 3d trackers have spawned in steamVR.
+      * if they dont appear there is a few reasons:
+        * possible the trackers are > 10m away from origin of SteamVR. The 
+          driver is filtering those data out.
+        * possible the trackers are in strange location that you simply 
+          can't render.
+        * possible the triangulation (esp. extrinsics!) is totally wrong. 
+          this will cause the triangulation to have very high reprojection 
+          error, resulting in no data being sent to SteamVR. 
+          * To solve this, god help you (really, I don't know how to fix a 
+            bad extrinsic calibration except for trying hard to redo 
+            calibration!)
+    * you should see the ui screen same like mediapipe-pose-VR repo.
+      * stand straight in front of the cameras, click the button 'calibrate'
+      * observe the sliders at the top have moved. calibration has been done.
+      * now go back to vr and observe your trackers are at the right position.
+* with the trackers in a correct position (ankle and hip), lauch your game 
+  and do the normal calibration in-game just like normal trackers.
+* enjoy your crappy 10hz tracking with only cameras! :D
+
+**Acknowledgements**
+
+Uwupose is built on the prior work:
+* https://github.com/ju1ce/Mediapipe-VR-Fullbody-Tracking
+* https://github.com/freemocap/freemocap
+* https://github.com/lambdaloop/anipose
+* https://google.github.io/mediapipe/solutions/pose
+
+##  todo the following - original README from FMC
+
 ____
 ____
 # Installation
