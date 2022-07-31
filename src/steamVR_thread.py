@@ -57,51 +57,6 @@ def pose_ok(pose3d):
     return is_ok
 
 
-def initialise_basestations(session):
-    for idx, camera in enumerate(session.cgroup.cameras):
-        # Tvec = camera.get_translation()  # numpy size 3.  in mm? since we calibed in mm.
-        #
-        # Tvec[0] = -Tvec[0]  # flip the points a bit since steamvrs coordinate system is a bit diffrent
-        # Tvec[1] = -Tvec[1]
-        #
-        # Tvec /= 1000
-
-        res = sendToSteamVR("addstation")
-        # tosend = f"updatestation {idx} {Tvec[0]} {Tvec[1]} {Tvec[2]} 1 0 0 0"
-        # res = sendToSteamVR(
-        #     tosend)  # right ('east'), elevation (up), backward (south)
-
-def set_basestations_pos(session):
-    for idx, camera in enumerate(session.cgroup.cameras):
-        Tvec = camera.get_translation()  # numpy size 3.  in mm? since we calibed in mm.
-
-        Tvec = Tvec.copy() # don't accidentally modify cgroup.
-        Tvec[0] = -Tvec[0]  # flip the points a bit since steamvrs coordinate system is a bit diffrent
-        Tvec[1] = -Tvec[1]
-
-        Tvec_meters = Tvec / 1000
-
-        Tvec_meters = session.params.global_rot_z.apply(Tvec_meters)
-        Tvec_meters = session.params.global_rot_x.apply(Tvec_meters)
-        Tvec_meters = session.params.global_rot_y.apply(Tvec_meters)
-
-        Tvec_meters += session.offset
-
-        # tosend = f"updatestation {idx} {Tvec_meters[0]} {Tvec_meters[1]} {Tvec_meters[2]} 1 0 0 0"
-        # print(tosend)
-        # res = sendToSteamVR(tosend)
-        #
-        # while "idinvalid" in res:
-        #     #add tracker and update it.
-        #     res = sendToSteamVR("addstation")
-        #     time.sleep(0.5)
-        #     tosend = f"updatestation {idx} {Tvec_meters[0]} {Tvec_meters[1]} {Tvec_meters[2]} 1 0 0 0"
-        #     res = sendToSteamVR(tosend)
-
-        # right ('east'), elevation (up), backward (south)
-
-
-
 def writeHeaders(writer):
     the_row = ["counter"]
     for idx in range(29):
@@ -138,17 +93,11 @@ class SteamVRThread(threading.Thread):
             self.connect_to_steamVR()
             time.sleep(1)
 
-
         self.session.use_hands = False
         if self.session.use_hands:
             self.total_trackers = 5
         else:
             self.total_trackers = 3
-
-        # give  other trackers 'None' as the role.
-        # roles = []
-        # for i in range(self.other_trackers):
-        #     roles.append("None")
 
         roles = ["TrackerRole_Waist", "TrackerRole_RightFoot",
                  "TrackerRole_LeftFoot"]
@@ -172,17 +121,8 @@ class SteamVRThread(threading.Thread):
             resp = sendToSteamVR(f"settings 50 "
                                  f"{self.params.smoothing} "
                                  f"{self.params.additional_smoothing}")
-            # print("settings returned this: ")
-            # print(resp)
-            # while "error" in resp:
-            #     resp = sendToSteamVR(f"settings 50 {params.smoothing} {params.additional_smoothing}")
-            #     print(resp)
-            #     time.sleep(1)
-        self.is_beeping = False
 
-        # create cameras (for debug purposes only -- since we are not
-        # calibrating ourselves with respect to the steamVR frame, the cameras postions will be very offset.)
-        # initialise_basestations(session)
+        self.is_beeping = False
 
     def run(self):
         # filter_memory = deque(maxlen = 5)
@@ -199,7 +139,6 @@ class SteamVRThread(threading.Thread):
             writer = csv.writer(f)
             writeHeaders(writer)
         frame_count = 0
-        count = 0
         try:
             stop_flag = False
             while not stop_flag:
@@ -288,10 +227,6 @@ class SteamVRThread(threading.Thread):
                     self.queue_3d_poses_from_SteamVR.append([headsetpos,
                                                              headsetrot])
 
-                if count % 200 == 0:
-                    # sent base station position
-                    set_basestations_pos(self.session)
-                count += 1
                 time.sleep(0.001)
         except KeyboardInterrupt:
             pass
