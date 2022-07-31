@@ -135,16 +135,6 @@ class UwuRuntime:
         gui_thread.start()
 
         # wait 10 seconds for camera-inference to become stable.
-        # At the same time, the user will hold still to do calibration.
-        # winsound.PlaySound('calib_prompter.mp3',
-        #                    winsound.SND_FILENAME | winsound.SND_ASYNC)
-        # time.sleep(0.3)
-        # do_calibration(pipe_3d_points_in, pixel_point_streams, session)
-
-        # from timeit import default_timer as timer
-        # start = timer()
-        # winsound.PlaySound('calib_complete.mp3',
-        #                    winsound.SND_FILENAME | winsound.SND_ASYNC)
         self.run_work_loop(pipe_3d_points_in, pixel_point_streams, session,
                            pipe_HMD_out)
 
