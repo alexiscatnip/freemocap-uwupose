@@ -363,6 +363,7 @@ class UwuRuntime:
         value = np.arctan2(feet_rot[0], feet_rot[2])
         print("Postcalib y value: ", value * 57.295779513)
 
+        # scale by height
         skelSize = np.max(self.session.previous_pose3d, axis=0) - np.min(
             self.session.previous_pose3d, axis=0)
         print("the camerase estimated you this tall : ", skelSize[1])
