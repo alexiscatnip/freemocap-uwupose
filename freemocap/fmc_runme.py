@@ -103,23 +103,13 @@ def RunMe(sessionID=None,
     else:
         sesh.initialize(stage)
 
-    # %% Stage Three
+    # %% Stage Three - read calib file.
     if stage <= 3:
         thisStage = 3
-        console.rule(style="color({})".format(thisStage))
-        console.rule('Starting Capture Volume Calibration'.upper(), style="color({})".format(thisStage))
-        console.rule(style="color({})".format(thisStage))
-        console.print(Padding('Loading Anipose-style 6DOF extrinsic parameters. for 3d reconstruction stage', (1, 4)),
-                      overflow="fold", justify='center', style="color({})".format(thisStage))
-        console.rule('See https://anipose.org for details', style="color({})".format(thisStage))
-        console.rule(style="color({})".format(thisStage))
-
-        #the following was used to calibrate based on old stage 2.
-        # let's just load the charuco points from our own calibration in anipose.'
-
-        # sesh.cgroup, sesh.mean_charuco_fr_mar_xyz = calibrate.CalibrateCaptureVolume(sesh,board, calVideoFrameLength)
         sesh.cgroup = CameraGroup.load('calibration.toml')
-        print('Loading calibration.toml Calibration File Successful!')
+        console.rule(style="color({})".format(thisStage))
+        console.rule('Loading calibration.toml Calibration File', style="color({})".format(thisStage))
+        print()
     else:
         print('Skipping Calibration')
 
