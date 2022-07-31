@@ -277,29 +277,30 @@ class UwuRuntime:
         calibration from original repo.
         assumptions:
         - user is standing up straight.
-        - the feetsies are directly below the hips.
+        - for SteamVR, the target space, its ground plane is level.
              ___
             /o o\
             \_O_/   <--- this is u
-            | | |
+            | | |   <--- use neck pose as the alignment point between the 2 frames. (for SteamVR_space, extrapolate from HMD to get the neck pose)
               |
-              |   <--- use hip as the alignment point.
+              |
              /\
-            /  \   <--- use between-feet as the 2nd alignment point
-            they should be vertical (x and z are zero)
+            /  \
 
         logical sequence:
-        - get (z) roll values by taking the vector from left foot to right
-        foot,
-        and take rotate along the roll axis until the vector is flat
-        relative to x-z plane. *The assumption is that the x-z plane of
-        to-space is also flat on the ground. *a secondary assumption is that this vector from left foot to right foot is not parallel to either x/z axis
+        *the assumption is that the x-z plane of Steam-vr space is also flat on the ground.
+
+        - Take vector from left foot to right foot. This represents the tilted-ness of the user relative to x-z plane/ground plane.
+        - from this vector, obtain (z) roll angle value relative to ground plane.
+        - rotate all points by the (negative of) roll angle value, to un-tilt the person.
+
         - repeat above for (x) tilt.
-        - using pose3d and hmd rotation, get their relative
-        yaw-difference.
-        - do scaling using extreme pose3d values.
-        - do translation of coordinate frames using 'offset' calculated
-        using neck postiions.
+
+        - using pose3d and hmd rotation, get the coordinate-spaces' relative yaw-difference.
+        - do scaling by syncing the height of user in the 2 coordinate frames.
+
+        - finally, do translation of coordinate frames using 'offset' calculated
+        using neck postions.
 
         """
         neckhmdpos, headsetrot = param
