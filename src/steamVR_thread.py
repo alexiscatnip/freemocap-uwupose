@@ -154,25 +154,7 @@ class SteamVRThread(threading.Thread):
                     rots = None
 
                 # to steamVR
-                if (pose3d is not None ) and (pose_ok(pose3d)): # dont send
-                    # if we are fucked!
-
-                    # if not pose_ok(pose3d):
-                    #     # print("failed to triangulate lower body for this frame.")
-                    #     self.is_beeping = True
-                    #     winsound.PlaySound('sound.wav',
-                    #                        winsound.SND_FILENAME | winsound.SND_ASYNC)
-                    #     continue
-
-                    # filter_memory
-                    # # smooth it.
-                    # smoothWinLength = 5
-                    # smoothOrder = 3
-                    # for dim in range(pose3d.shape[1]):
-                    #     for mm in range(pose3d.shape[0]):
-                    #         pose3d[mm, dim] = savgol_filter(
-                    #             pose3d[mm, dim], smoothWinLength, smoothOrder)
-
+                if (pose3d is not None ) and (pose_ok(pose3d)): 
                     # send feet and hip
                     frameTime = time.time() - lastSentTime
                     last_frame_times.append(frameTime)
