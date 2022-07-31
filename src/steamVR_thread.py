@@ -19,7 +19,7 @@ def pose_ok(pose3d):
     """
     return true only if important joints are OK.
 
-    happens when one of the filtering step has removed it due to
+    happens when one of the filtering step has removed it due to too-high
     reprojection error.
     """
     hip_left = 2
@@ -89,19 +89,16 @@ class SteamVRThread(threading.Thread):
 
         # 1. initialise steamVR connection - keep looping until ok.
         self.steamVR_found = False
-        while not self.steamVR_found:
-            self.connect_to_steamVR()
-            time.sleep(1)
+        self.Init_SteamVR()
 
-        self.session.use_hands = False
-        if self.session.use_hands:
-            self.total_trackers = 5
-        else:
-            self.total_trackers = 3
-
+        # 2. initialise our trackers in steamVR
         roles = ["TrackerRole_Waist", "TrackerRole_RightFoot",
                  "TrackerRole_LeftFoot"]
-        # 2. initialise our trackers in steamVR
+        self.Init_SteamVRTrackers(roles)
+
+        self.is_beeping = False
+
+    def Init_SteamVRTrackers(self, roles):
         if True:
             for i in range(self.num_trackers, self.total_trackers):
                 # adding a tracker into VR.
@@ -122,7 +119,18 @@ class SteamVRThread(threading.Thread):
                                  f"{self.params.smoothing} "
                                  f"{self.params.additional_smoothing}")
 
-        self.is_beeping = False
+    def Init_SteamVR(self):
+        """
+        connect to Steam VR API.
+        """
+        while not self.steamVR_found:
+            self.connect_to_steamVR()
+            time.sleep(1)
+        self.session.use_hands = False
+        if self.session.use_hands:
+            self.total_trackers = 5
+        else:
+            self.total_trackers = 3
 
     def run(self):
         # filter_memory = deque(maxlen = 5)
@@ -154,60 +162,11 @@ class SteamVRThread(threading.Thread):
                     rots = None
 
                 # to steamVR
-                if (pose3d is not None ) and (pose_ok(pose3d)): 
-                    # send feet and hip
-                    frameTime = time.time() - lastSentTime
-                    last_frame_times.append(frameTime)
-                    if (writeToCsv):
-                        line = [frame_count]
-                        frame_count += 1
-                        flat = pose3d.flatten()
-                        flat = flat.tolist()
-                        line = line + flat
-
-                        line = line + reprojectionerror.tolist()
-
-                        line = line + [frameTime]
-                        writer.writerow(line)
-
-                    lastSentTime = time.time()
-                    print("FPS : " + str(1 / mean(last_frame_times)))
-                    for i in [(0, 1), (5, 2), (6, 0)]:
-                    # for i in [(6, 0)]:
-                        joint = pose3d[i[0]]
-                        # words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {-frameTime - self.camera_latency} 0.0"
-                        words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {0} 0"
-                        res = sendToSteamVR(words)
-                        print(words)
-
-                    if self.session.use_hands:
-                         hand_rots = get_rot_hands(pose3d)
-                         for i in [(10, 0), (15, 1)]:
-                         # for i in [(10, 0)]:
-                             joint = pose3d[i[
-                                 0]]  # for each foot and hips, offset it by skeleton position and send to steamvr
-                             handmsg = f"updatepose {i[1] + 1} {joint[0]} {joint[1]} {joint[2]} {hand_rots[i[1]][3]} {hand_rots[i[1]][0]} {hand_rots[i[1]][1]} {hand_rots[i[1]][2]} {0} 0"
-                             sendToSteamVR(handmsg)
-                             # print(handmsg)
+                self.PushTo_SteamVR(frame_count, lastSentTime, last_frame_times, pose3d, reprojectionerror, rots,
+                                    writeToCsv, writer)
 
                 # from steamvr
-                array = sendToSteamVR("getdevicepose 0")
-                if "error" in array:
-                    pass
-                else:
-
-                    headsetpos = [float(array[3]), float(array[4]),
-                                  float(array[5])]
-                    headsetrot = R.from_quat(
-                        [float(array[7]), float(array[8]), float(array[9]),
-                         float(array[6])])
-
-                    neckoffset = headsetrot.apply(
-                        [0, -0.2,
-                         0.1])  # the neck position seems to be the best point to allign to, as its well defined on
-                    # the skeleton (unlike the eyes/nose, which jump around) and can be calculated from hmd.
-                    self.queue_3d_poses_from_SteamVR.append([headsetpos,
-                                                             headsetrot])
+                self.PullFrom_SteamVR()
 
                 time.sleep(0.001)
         except KeyboardInterrupt:
@@ -215,6 +174,63 @@ class SteamVRThread(threading.Thread):
         finally:
             if writeToCsv:
                 f.close()
+
+    def PullFrom_SteamVR(self):
+        array = sendToSteamVR("getdevicepose 0")
+        if "error" in array:
+            pass
+        else:
+
+            headsetpos = [float(array[3]), float(array[4]),
+                          float(array[5])]
+            headsetrot = R.from_quat(
+                [float(array[7]), float(array[8]), float(array[9]),
+                 float(array[6])])
+
+            neckoffset = headsetrot.apply(
+                [0, -0.2,
+                 0.1])  # the neck position seems to be the best point to allign to, as its well defined on
+            # the skeleton (unlike the eyes/nose, which jump around) and can be calculated from hmd.
+            self.queue_3d_poses_from_SteamVR.append([headsetpos,
+                                                     headsetrot])
+
+    def PushTo_SteamVR(self, frame_count, lastSentTime, last_frame_times, pose3d, reprojectionerror, rots, writeToCsv,
+                       writer):
+        if (pose3d is not None) and (pose_ok(pose3d)):
+            # send feet and hip
+            frameTime = time.time() - lastSentTime
+            last_frame_times.append(frameTime)
+            if (writeToCsv):
+                line = [frame_count]
+                frame_count += 1
+                flat = pose3d.flatten()
+                flat = flat.tolist()
+                line = line + flat
+
+                line = line + reprojectionerror.tolist()
+
+                line = line + [frameTime]
+                writer.writerow(line)
+
+            lastSentTime = time.time()
+            print("FPS : " + str(1 / mean(last_frame_times)))
+            for i in [(0, 1), (5, 2), (6, 0)]:
+                # for i in [(6, 0)]:
+                joint = pose3d[i[0]]
+                # words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {-frameTime - self.camera_latency} 0.0"
+                words = f"updatepose {i[1]} {joint[0]} {joint[1]} {joint[2]} {rots[i[1]][3]} {rots[i[1]][0]} {rots[i[1]][1]} {rots[i[1]][2]} {0} 0"
+                res = sendToSteamVR(words)
+                print(words)
+
+            if self.session.use_hands:
+                hand_rots = get_rot_hands(pose3d)
+                for i in [(10, 0), (15, 1)]:
+                    # for i in [(10, 0)]:
+                    joint = pose3d[i[
+                        0]]  # for each foot and hips, offset it by skeleton position and send to steamvr
+                    handmsg = f"updatepose {i[1] + 1} {joint[0]} {joint[1]} {joint[2]} {hand_rots[i[1]][3]} {hand_rots[i[1]][0]} {hand_rots[i[1]][1]} {hand_rots[i[1]][2]} {0} 0"
+                    sendToSteamVR(handmsg)
+                    # print(handmsg)
 
     def connect_to_steamVR(self):
         use_steamvr = True
