@@ -3,13 +3,12 @@ from collections import deque
 from typing import Deque, List
 
 import numpy
-import winsound
 
 from freemocap import fmc_mediapipe, reconstruct3D, play_skeleton_animation, \
     inference_gui
 from freemocap.parameters import Parameters
 from freemocap.session import Session
-from freemocap.webcam import startcamrecording, timesync, videotrim
+from freemocap.webcam import startcamrecording
 
 from pathlib import Path
 import time
@@ -375,41 +374,3 @@ class UwuRuntime:
         print("because neck hmd pos : ", neckhmdpos)
         print("because neck pos in cameraframe : ", self.session.previous_pose3d[7])
 
-
-def SyncCams(session, timeStampData, numCamRange, vidNames, camIDs):
-    """ 
-    Runs the time-syncing process. Accesses saved timestamps, runs the time-syncing GUI, and on user-permission, proceeds to create
-    synced videos 
-    """
-    session.syncedVidPath.mkdir(exist_ok=True)
-
-    # start the timesync process
-    frameTable, timeTable, unix_synced_timeTable, frameRate, resultsTable, plots = timesync.TimeSync(
-        session,
-        timeStampData,
-        numCamRange,
-        camIDs)
-
-    # this message shows you your percentages and asks if you would like to continue or not. shuts down the program if no
-    root = Tk()
-    proceed = timesync.proceedGUI(
-        root, resultsTable, plots
-    )  # create a GUI instance called proceed
-    root.mainloop()
-
-    if session.get_synced_unix_timestamps == True:
-        unix_synced_timestamps_csvName = 'unix_synced_timestamps.csv'
-        unix_synced_timestamps_csvPath = session.sessionPath / unix_synced_timestamps_csvName
-        unix_synced_timeTable.to_csv(unix_synced_timestamps_csvPath)
-
-    if proceed.proceed == True:
-        print()
-        print('Starting editing')
-        videotrim.VideoTrim(session, vidNames, frameTable,
-                            session.parameterDictionary,
-                            session.rotationInputs,
-                            numCamRange)
-        session.session_settings['recording_parameters'].update(
-            {'numFrames': session.numFrames})
-        # videotrim.createCalibrationVideos(session,60,parameterDictionary)
-        print('all done')
