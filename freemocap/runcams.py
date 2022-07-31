@@ -162,30 +162,6 @@ class UwuRuntime:
 
         return position
 
-    def do_calib_using_common_child_frame(self, hmd_neck, camera_neck):
-        """
-        we have an object, whose pos and rot are expressed in 2 coordinate frames.
-        we wish to find the transformation between the 2 coordinate frames
-
-        in particular, find the transform that maps points expressed in
-        camera-frame,
-        into points expressed in hmd-frame.
-        """
-
-        # in to-space
-        to_pos = hmd_neck[0]
-        to_rot = hmd_neck[1]
-        # in from-space
-        from_pos = camera_neck[0]
-        from_rot = camera_neck[1]
-
-        print(str(to_pos))
-        print(str(to_rot))
-        print(str(from_pos))
-        print(str(from_rot))
-
-        return
-
     def run_work_loop(self, pipe_3d_points_in, pixel_point_streams, session:
     Session, pipe_HMD_out):
         """main triangulation loop. the main 'while-loop' """
